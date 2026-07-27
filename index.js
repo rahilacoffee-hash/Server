@@ -13,11 +13,18 @@ import statusRouter from "./route/Status.route.js";
 dotenv.config();
 
 const PORT = process.env.PORT || 5000;
+const clientOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+// Restrict production to CLIENT_URL when it is set.  Until then, permit a
+// browser origin so a separately deployed frontend can reach this API.
+const corsOrigin = process.env.CLIENT_URL ? clientOrigins : true;
 
 const app = express();
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: corsOrigin,
     credentials: true,
   }),
 );
