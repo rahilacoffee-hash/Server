@@ -20,14 +20,16 @@ const clientOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
 // Restrict production to CLIENT_URL when it is set.  Until then, permit a
 // browser origin so a separately deployed frontend can reach this API.
 const corsOrigin = process.env.CLIENT_URL ? clientOrigins : true;
+const corsOptions = {
+  origin: corsOrigin,
+  credentials: true,
+  methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
 
 const app = express();
-app.use(
-  cors({
-    origin: corsOrigin,
-    credentials: true,
-  }),
-);
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 

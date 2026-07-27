@@ -14,6 +14,11 @@ const clientOrigins = (process.env.CLIENT_URL || "http://localhost:5173")
   .map((origin) => origin.trim())
   .filter(Boolean);
 const corsOrigin = process.env.CLIENT_URL ? clientOrigins : true;
+const corsOptions = {
+  origin: corsOrigin,
+  credentials: true,
+  methods: ["GET", "POST"],
+};
 
 function getSocketsForUser(userId) {
 return userSocketMap[userId] || [];
@@ -34,8 +39,7 @@ return io;
 function initSocket(httpServer) {
 io = new Server(httpServer, {
 cors: {
-origin: corsOrigin,
-credentials: true,
+...corsOptions,
 },
 });
 
