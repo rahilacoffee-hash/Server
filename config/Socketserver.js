@@ -561,16 +561,18 @@ socket.on("addReaction", async ({ messageId, reaction, receiverId }) => {
 
     if (!message) return;
 
-    // remove previous reaction from same user
+    // A user has at most one reaction. Sending a null reaction (or selecting
+    // the same emoji again) removes it, matching WhatsApp's toggle behavior.
     message.reactions = message.reactions.filter(
       (r) => r.userId.toString() !== userId
     );
 
-    // add new reaction
-    message.reactions.push({
-      userId,
-      type: reaction,
-    });
+    if (reaction) {
+      message.reactions.push({
+        userId,
+        type: reaction,
+      });
+    }
 
     await message.save();
 
