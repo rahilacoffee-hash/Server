@@ -553,7 +553,7 @@ socket.on(
 );
 
 
-socket.on("addReaction", async ({ messageId, reaction, receiverId }) => {
+socket.on("addReaction", async ({ messageId, reaction }) => {
   try {
     const userId = socket.userId;
 
@@ -580,15 +580,14 @@ socket.on("addReaction", async ({ messageId, reaction, receiverId }) => {
       .populate("sender", "name avatar")
       .populate("receiver", "name avatar");
 
-    // send to receiver
-    const receiverSockets = getSocketsForUser(receiverId);
-
-    receiverSockets.forEach((socketId) => {
-      io.to(socketId).emit("messageReactionUpdated", populated);
+    // Broadcast from the stored message participants, not a client-provided
+    // receiver id. This keeps reaction updates in sync on every open device.
+    const participantIds = [message.sender, message.receiver].map((id) => id.toString());
+    [...new Set(participantIds)].forEach((participantId) => {
+      getSocketsForUser(participantId).forEach((socketId) => {
+        io.to(socketId).emit("messageReactionUpdated", populated);
+      });
     });
-
-    // also send to sender
-    socket.emit("messageReactionUpdated", populated);
   } catch (err) {
     console.log("reaction error", err.message);
   }

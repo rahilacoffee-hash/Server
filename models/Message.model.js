@@ -65,6 +65,22 @@ const messageSchema = new mongoose.Schema(
       default: false,
     },
     deletedFor: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    // One reaction per user; the socket handler replaces a user's previous
+    // reaction and broadcasts the saved message to both participants.
+    reactions: [
+      {
+        userId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        type: {
+          type: String,
+          required: true,
+          trim: true,
+        },
+      },
+    ],
   },
   { timestamps: true } // gives us createdAt as the "sent" timestamp for free
 );
