@@ -86,6 +86,50 @@ export async function getOrCreateConversationController(req, res) {
   }
 }
 
+export async function createGroupConversationController(req, res) {
+  try {
+    const { name, participantIds = [] } = req.body;
+    const participantSet = [...new Set([req.userId.toString(), ...participantIds.map(String)])];
+
+    if (!name?.trim() || participantSet.length < 3) {
+      return res.status(400).json({ success: false, error: true, message: "A group needs a name and at least two members" });
+    }
+
+    const conversation = await ConversationModel.create({
+      participants: participantSet,
+      isGroup: true,
+      groupName: name.trim(),
+      admins: [req.userId],
+    });
+    const populated = await ConversationModel.findById(conversation._id)
+      .populate("participants", "name email avatar isOnline lastSeen")
+      .populate("admins", "name avatar");
+
+    return res.status(201).json({ success: true, error: false, data: populated });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: true, message: error.message });
+  }
+}
+
+export async function addGroupMembersController(req, res) {
+  try {
+    const { participantIds = [] } = req.body;
+    const conversation = await ConversationModel.findOne({
+      _id: req.params.conversationId,
+      isGroup: true,
+      admins: req.userId,
+    });
+    if (!conversation) return res.status(404).json({ success: false, error: true, message: "Group not found or you are not an admin" });
+
+    conversation.participants = [...new Set([...conversation.participants.map(String), ...participantIds.map(String)])];
+    await conversation.save();
+    const populated = await ConversationModel.findById(conversation._id).populate("participants", "name email avatar isOnline lastSeen");
+    return res.json({ success: true, error: false, data: populated });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: true, message: error.message });
+  }
+}
+
 export async function getMessagesController(req, res) {
   try {
     const userId = req.userId;

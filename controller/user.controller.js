@@ -302,6 +302,16 @@ export async function searchUserController(req, res) {
   }
 }
 
+export async function getPublicUserController(req, res) {
+  try {
+    const user = await UserModel.findById(req.params.userId).select("name username avatar bio mobile isOnline lastSeen");
+    if (!user) return res.status(404).json({ message: "User not found", success: false, error: true });
+    return res.json({ data: user, success: true, error: false });
+  } catch (error) {
+    return res.status(400).json({ message: "Invalid user", success: false, error: true });
+  }
+}
+
 export async function forgotPasswordController(req, res) {
   try {
     const { email } = req.body;

@@ -142,10 +142,7 @@ socket.on(
         replyTo = null,
       } = payload;
 
-      if (
-        !conversationId ||
-        !receiverId
-      ) {
+      if (!conversationId) {
         return callback?.({
           success: false,
           message:
@@ -153,11 +150,25 @@ socket.on(
         });
       }
 
+      const conversation = await ConversationModel.findOne({
+        _id: conversationId,
+        participants: userId,
+      });
+
+      if (!conversation) {
+        return callback?.({ success: false, message: "Conversation not found" });
+      }
+
+      const recipientIds = conversation.participants
+        .map((participant) => participant.toString())
+        .filter((participantId) => participantId !== userId.toString());
+      const primaryReceiverId = receiverId || recipientIds[0];
+
       let message =
         await MessageModel.create({
           conversationId,
           sender: userId,
-          receiver: receiverId,
+          receiver: primaryReceiverId,
           type,
           text,
           mediaUrl,
@@ -183,42 +194,19 @@ socket.on(
             populate: { path: "sender", select: "name avatar" },
           });
 
-      const conversation =
-        await ConversationModel.findById(
-          conversationId
-        );
-
-      if (!conversation) {
-        return callback?.({
-          success: false,
-          message:
-            "Conversation not found",
-        });
-      }
-
       conversation.lastMessage =
         message._id;
 
-      const unread =
-        conversation.unreadCounts.get(
-          receiverId
-        ) || 0;
-
-      conversation.unreadCounts.set(
-        receiverId,
-        unread + 1
-      );
+      recipientIds.forEach((recipientId) => {
+        const unread = conversation.unreadCounts.get(recipientId) || 0;
+        conversation.unreadCounts.set(recipientId, unread + 1);
+      });
 
       await conversation.save();
 
-      const receiverSockets =
-        getSocketsForUser(
-          receiverId
-        );
+      const receiverSockets = recipientIds.flatMap((recipientId) => getSocketsForUser(recipientId));
 
-      if (
-        receiverSockets.length > 0
-      ) {
+      if (receiverSockets.length > 0) {
         message.deliveredAt =
           new Date();
 

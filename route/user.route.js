@@ -3,6 +3,7 @@ import {
   loginUserController,
   registerUserController,
   searchUserController,
+  getPublicUserController,
   updateUserController,
   verifyEmailController,
 } from "../controller/user.controller.js";
@@ -22,5 +23,6 @@ userRouter.post("/verify-forgot-password-otp", verifyforgotPasswordOtp);
 userRouter.post("/reset-password", resetPassword);
 userRouter.post("/refresh-token", refreshToken);
 userRouter.get("/search", auth, searchUserController);
+userRouter.get("/:userId", auth, getPublicUserController);
 
 export default userRouter;
