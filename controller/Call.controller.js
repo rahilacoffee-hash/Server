@@ -8,11 +8,20 @@ const splitUrls = (value, fallback = []) =>
     .concat(fallback);
 
 export const getIceServersController = (req, res) => {
-  const stunUrls = splitUrls(process.env.STUN_URLS, [
+  const maxIceUrls = 4;
+  const configuredStunUrls = splitUrls(process.env.STUN_URLS, [
     "stun:stun.cloudflare.com:3478",
     "stun:stun.l.google.com:19302",
   ]);
-  const turnUrls = splitUrls(process.env.TURN_URLS);
+  const configuredTurnUrls = splitUrls(process.env.TURN_URLS);
+  const turnUrls = [...new Set(configuredTurnUrls)].slice(0, 3);
+  // Browsers warn, and can take noticeably longer to connect on mobile, when
+  // five or more ICE URLs are supplied. Prefer the TURN transports and retain
+  // only enough STUN fallbacks to keep the total at four or fewer.
+  const stunUrls = [...new Set(configuredStunUrls)].slice(
+    0,
+    Math.max(0, maxIceUrls - turnUrls.length),
+  );
   const turnSecret = process.env.TURN_SHARED_SECRET;
   const ttlSeconds = Math.min(
     Math.max(Number.parseInt(process.env.TURN_CREDENTIAL_TTL_SECONDS || "3600", 10) || 3600, 60),
