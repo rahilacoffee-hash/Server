@@ -8,18 +8,27 @@ const splitUrls = (value, fallback = []) =>
     .concat(fallback);
 
 export const getIceServersController = (req, res) => {
-  // Keep Metered's complete recommended relay set: UDP/TCP on 80 and 443,
-  // plus TURN-over-TLS on 443. The TLS fallback is vital on mobile networks
-  // that block ordinary UDP/TCP TURN traffic.
-  const maxIceUrls = 5;
+  // Chrome warns when five or more ICE URLs are supplied. Retain one direct
+  // STUN candidate and the three useful relay paths for mobile networks.
+  const maxIceUrls = 4;
   const configuredStunUrls = splitUrls(process.env.STUN_URLS, [
     "stun:stun.cloudflare.com:3478",
     "stun:stun.l.google.com:19302",
   ]);
   const configuredTurnUrls = splitUrls(process.env.TURN_URLS);
-  const turnUrls = [...new Set(configuredTurnUrls)].slice(0, 4);
-  // One STUN endpoint alongside Metered's four TURN transports gives Chrome
-  // a direct-path candidate when possible without dropping TLS fallback.
+  const uniqueTurnUrls = [...new Set(configuredTurnUrls)];
+  // Prefer UDP and TCP on 80 plus TURN-over-TLS on 443. Plain UDP on port 443
+  // is redundant once these paths are available and would trigger Chrome's
+  // five-or-more-servers discovery warning.
+  const turnUrls = uniqueTurnUrls.length <= 3
+    ? uniqueTurnUrls
+    : [
+        uniqueTurnUrls.find((url) => url.startsWith("turn:") && url.includes(":80") && !url.includes("transport=")),
+        uniqueTurnUrls.find((url) => url.startsWith("turn:") && url.includes("transport=tcp")),
+        uniqueTurnUrls.find((url) => url.startsWith("turns:") && url.includes(":443")),
+      ].filter(Boolean);
+  // One STUN endpoint alongside three TURN transports gives Chrome a direct
+  // path when possible without dropping TLS fallback.
   const stunUrls = [...new Set(configuredStunUrls)].slice(
     0,
     Math.max(0, maxIceUrls - turnUrls.length),
