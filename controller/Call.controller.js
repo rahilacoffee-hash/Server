@@ -8,16 +8,18 @@ const splitUrls = (value, fallback = []) =>
     .concat(fallback);
 
 export const getIceServersController = (req, res) => {
-  const maxIceUrls = 4;
+  // Keep Metered's complete recommended relay set: UDP/TCP on 80 and 443,
+  // plus TURN-over-TLS on 443. The TLS fallback is vital on mobile networks
+  // that block ordinary UDP/TCP TURN traffic.
+  const maxIceUrls = 5;
   const configuredStunUrls = splitUrls(process.env.STUN_URLS, [
     "stun:stun.cloudflare.com:3478",
     "stun:stun.l.google.com:19302",
   ]);
   const configuredTurnUrls = splitUrls(process.env.TURN_URLS);
-  const turnUrls = [...new Set(configuredTurnUrls)].slice(0, 3);
-  // Browsers warn, and can take noticeably longer to connect on mobile, when
-  // five or more ICE URLs are supplied. Prefer the TURN transports and retain
-  // only enough STUN fallbacks to keep the total at four or fewer.
+  const turnUrls = [...new Set(configuredTurnUrls)].slice(0, 4);
+  // One STUN endpoint alongside Metered's four TURN transports gives Chrome
+  // a direct-path candidate when possible without dropping TLS fallback.
   const stunUrls = [...new Set(configuredStunUrls)].slice(
     0,
     Math.max(0, maxIceUrls - turnUrls.length),
