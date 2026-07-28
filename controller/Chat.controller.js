@@ -164,6 +164,10 @@ export async function getMessagesController(req, res) {
         path: "replyTo",
         populate: { path: "sender", select: "name avatar" },
       })
+      .populate({
+        path: "statusReplyTo",
+        populate: { path: "author", select: "name avatar" },
+      })
       .sort({
         createdAt: 1,
       });

@@ -56,6 +56,12 @@ const messageSchema = new mongoose.Schema(
       ref: "Message",
       default: null,
     },
+    // Set when this chat message was sent as a reply to a 24-hour status.
+    statusReplyTo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Status",
+      default: null,
+    },
     editedAt: {
       type: Date,
       default: null,
