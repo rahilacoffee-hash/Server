@@ -21,151 +21,121 @@ const corsOptions = {
 };
 
 function getSocketsForUser(userId) {
-return userSocketMap[userId] || [];
+  return userSocketMap[userId] || [];
 }
 
 function isUserOnline(userId) {
-return getSocketsForUser(userId).length > 0;
+  return getSocketsForUser(userId).length > 0;
 }
 
 function getIO() {
-if (!io) {
-throw new Error("Socket.io not initialized yet");
-}
+  if (!io) {
+    throw new Error("Socket.io not initialized yet");
+  }
 
-return io;
+  return io;
 }
 
 function initSocket(httpServer) {
-io = new Server(httpServer, {
-cors: {
-...corsOptions,
-},
-});
+  io = new Server(httpServer, {
+    cors: {
+      ...corsOptions,
+    },
+  });
 
-io.use((socket, next) => {
-try {
-const token =
-socket.handshake.auth?.token;
-
-
-  if (!token) {
-    return next(
-      new Error(
-        "No auth token provided"
-      )
-    );
-  }
-
-  const decoded = jwt.verify(
-    token,
-    process.env
-      .SECRET_KEY_ACCESS_TOKEN
-  );
-
-  socket.userId =
-    decoded.id ||
-    decoded._id ||
-    decoded.userId;
-
-  next();
-} catch (error) {
-  next(
-    new Error(
-      "Invalid or expired token"
-    )
-  );
-}
-
-
-});
-
-io.on("connection", async (socket) => {
-const userId = socket.userId;
-
-
-console.log(
-  `🟢 User connected: ${userId}`
-);
-
-// =====================
-// ONLINE USERS
-// =====================
-
-if (!userSocketMap[userId]) {
-  userSocketMap[userId] = [];
-}
-
-if (
-  !userSocketMap[userId].includes(
-    socket.id
-  )
-) {
-  userSocketMap[userId].push(
-    socket.id
-  );
-}
-
-await UserModel.findByIdAndUpdate(
-  userId,
-  {
-    isOnline: true,
-  }
-);
-
-socket.emit(
-  "onlineUsers",
-  Object.keys(userSocketMap)
-);
-
-io.emit("userOnline", userId);
-
-// =====================
-// SEND MESSAGE
-// =====================
-
-socket.on(
-  "sendMessage",
-  async (
-    payload,
-    callback
-  ) => {
+  // ==========================
+  // AUTH MIDDLEWARE
+  // ==========================
+  io.use((socket, next) => {
     try {
-      const {
-        conversationId,
-        receiverId,
-        type = "text",
-        text = "",
-        mediaUrl = "",
-        fileName = "",
-        fileSize = 0,
-        replyTo = null,
-      } = payload;
+      const token = socket.handshake.auth?.token;
 
-      if (!conversationId) {
-        return callback?.({
-          success: false,
-          message:
-            "Missing required fields",
+      if (!token) {
+        return next(new Error("No auth token provided"));
+      }
+
+      const decoded = jwt.verify(token, process.env.SECRET_KEY_ACCESS_TOKEN);
+
+      socket.userId = decoded.id || decoded._id || decoded.userId;
+
+      next();
+    } catch (error) {
+      // Same message reaches the client either way, but we log the real
+      // cause so "token genuinely expired" and "bad secret / malformed
+      // token" don't get confused with each other while debugging.
+      if (error.name === "TokenExpiredError") {
+        console.warn("🔒 Socket auth: token expired for a connecting client");
+      } else {
+        console.error("🔒 Socket auth: verify failed —", error.name, error.message);
+      }
+      next(new Error("Invalid or expired token"));
+    }
+  });
+
+  io.on("connection", async (socket) => {
+    const userId = socket.userId;
+
+    console.log(`🟢 User connected: ${userId}`);
+
+    // =====================
+    // ONLINE USERS
+    // =====================
+
+    if (!userSocketMap[userId]) {
+      userSocketMap[userId] = [];
+    }
+
+    if (!userSocketMap[userId].includes(socket.id)) {
+      userSocketMap[userId].push(socket.id);
+    }
+
+    await UserModel.findByIdAndUpdate(userId, {
+      isOnline: true,
+    });
+
+    socket.emit("onlineUsers", Object.keys(userSocketMap));
+
+    io.emit("userOnline", userId);
+
+    // =====================
+    // SEND MESSAGE
+    // =====================
+
+    socket.on("sendMessage", async (payload, callback) => {
+      try {
+        const {
+          conversationId,
+          receiverId,
+          type = "text",
+          text = "",
+          mediaUrl = "",
+          fileName = "",
+          fileSize = 0,
+          replyTo = null,
+        } = payload;
+
+        if (!conversationId) {
+          return callback?.({
+            success: false,
+            message: "Missing required fields",
+          });
+        }
+
+        const conversation = await ConversationModel.findOne({
+          _id: conversationId,
+          participants: userId,
         });
-      }
 
-      const conversation = await ConversationModel.findOne({
-        _id: conversationId,
-        participants: userId,
-      });
+        if (!conversation) {
+          return callback?.({ success: false, message: "Conversation not found" });
+        }
 
-      if (!conversation) {
-        return callback?.({ success: false, message: "Conversation not found" });
-      }
+        const recipientIds = conversation.participants
+          .map((participant) => participant.toString())
+          .filter((participantId) => participantId !== userId.toString());
+        const primaryReceiverId = receiverId || recipientIds[0];
 
-      const recipientIds = conversation.participants
-        .map((participant) => participant.toString())
-        .filter((participantId) => participantId !== userId.toString());
-      const primaryReceiverId = receiverId || recipientIds[0];
-
-      let message =
-        await MessageModel.create({
+        let message = await MessageModel.create({
           conversationId,
           sender: userId,
           receiver: primaryReceiverId,
@@ -177,490 +147,353 @@ socket.on(
           replyTo,
         });
 
-      message =
-        await MessageModel.findById(
-          message._id
-        )
-          .populate(
-            "sender",
-            "name email avatar isOnline lastSeen"
-          )
-          .populate(
-            "receiver",
-            "name email avatar isOnline lastSeen"
-          )
+        message = await MessageModel.findById(message._id)
+          .populate("sender", "name email avatar isOnline lastSeen")
+          .populate("receiver", "name email avatar isOnline lastSeen")
           .populate({
             path: "replyTo",
             populate: { path: "sender", select: "name avatar" },
           });
 
-      conversation.lastMessage =
-        message._id;
+        conversation.lastMessage = message._id;
 
-      recipientIds.forEach((recipientId) => {
-        const unread = conversation.unreadCounts.get(recipientId) || 0;
-        conversation.unreadCounts.set(recipientId, unread + 1);
-      });
+        recipientIds.forEach((recipientId) => {
+          const unread = conversation.unreadCounts.get(recipientId) || 0;
+          conversation.unreadCounts.set(recipientId, unread + 1);
+        });
 
-      await conversation.save();
+        await conversation.save();
 
-      const receiverSockets = recipientIds.flatMap((recipientId) => getSocketsForUser(recipientId));
+        const receiverSockets = recipientIds.flatMap((recipientId) => getSocketsForUser(recipientId));
 
-      if (receiverSockets.length > 0) {
-        message.deliveredAt =
-          new Date();
+        if (receiverSockets.length > 0) {
+          message.deliveredAt = new Date();
 
-        await message.save();
+          await message.save();
 
-        receiverSockets.forEach(
-          (socketId) => {
-            io.to(socketId).emit(
-              "newMessage",
-              message
-            );
+          receiverSockets.forEach((socketId) => {
+            io.to(socketId).emit("newMessage", message);
 
-            io.to(socketId).emit(
-              "conversationUpdated"
-            );
-          }
-        );
+            io.to(socketId).emit("conversationUpdated");
+          });
 
-        socket.emit(
-          "messageStatusUpdate",
-          {
-            messageId:
-              message._id,
-            deliveredAt:
-              message.deliveredAt,
-          }
-        );
+          socket.emit("messageStatusUpdate", {
+            messageId: message._id,
+            deliveredAt: message.deliveredAt,
+          });
+        }
+
+        socket.emit("conversationUpdated");
+
+        callback?.({
+          success: true,
+          message,
+        });
+      } catch (error) {
+        console.error(error);
+
+        callback?.({
+          success: false,
+          message: "Failed to send message",
+        });
+      }
+    });
+
+    // ==========================
+    // CALLING (WEBRTC SIGNALING)
+    // ==========================
+
+    socket.on("callUser", ({ receiverId, offer, callerName, callType = "voice" }, callback) => {
+      const receiverSockets = getSocketsForUser(receiverId);
+
+      if (!receiverSockets.length) {
+        callback?.({ success: false, message: "User is not online" });
+        return;
       }
 
-      socket.emit(
-        "conversationUpdated"
-      );
-
-      callback?.({
-        success: true,
-        message,
+      receiverSockets.forEach((socketId) => {
+        io.to(socketId).emit("incomingCall", {
+          callerId: userId,
+          callerName,
+          callType,
+          offer,
+        });
       });
-    } catch (error) {
-      console.error(error);
 
-      callback?.({
-        success: false,
-        message:
-          "Failed to send message",
+      socket.data.callTarget = receiverId;
+
+      callback?.({ success: true });
+    });
+
+    socket.on("answerCall", ({ callerId, answer }) => {
+      const callerSockets = getSocketsForUser(callerId);
+
+      callerSockets.forEach((socketId) => {
+        io.to(socketId).emit("callAnswered", {
+          answer,
+        });
       });
-    }
-  }
-);
 
-// ==========================
-// CALLING (WEBRTC SIGNALING)
-// ==========================
-
-socket.on("callUser", ({ receiverId, offer, callerName, callType = "voice" }, callback) => {
-  const receiverSockets = getSocketsForUser(receiverId);
-
-  if (!receiverSockets.length) {
-    callback?.({ success: false, message: "User is not online" });
-    return;
-  }
-
-  receiverSockets.forEach((socketId) => {
-    io.to(socketId).emit("incomingCall", {
-      callerId: userId,
-      callerName,
-      callType,
-      offer,
+      socket.data.callTarget = callerId;
     });
-  });
 
-  socket.data.callTarget = receiverId;
+    socket.on("iceCandidate", ({ targetUserId, candidate }) => {
+      const sockets = getSocketsForUser(targetUserId);
 
-  callback?.({ success: true });
-});
-
-socket.on("answerCall", ({ callerId, answer }) => {
-  const callerSockets = getSocketsForUser(callerId);
-
-  callerSockets.forEach((socketId) => {
-    io.to(socketId).emit("callAnswered", {
-      answer,
+      sockets.forEach((socketId) => {
+        io.to(socketId).emit("iceCandidate", candidate);
+      });
     });
-  });
 
-  socket.data.callTarget = callerId;
-});
+    socket.on("endCall", ({ targetUserId }) => {
+      const sockets = getSocketsForUser(targetUserId);
 
-socket.on("iceCandidate", ({ targetUserId, candidate }) => {
-  const sockets = getSocketsForUser(targetUserId);
-
-  sockets.forEach((socketId) => {
-    io.to(socketId).emit("iceCandidate", candidate);
-  });
-});
-
-socket.on("endCall", ({ targetUserId }) => {
-  const sockets = getSocketsForUser(targetUserId);
-
-  sockets.forEach((socketId) => {
-    io.to(socketId).emit("callEnded");
-  });
-
-  socket.data.callTarget = null;
-});
-
-socket.on("rejectCall", ({ callerId }) => {
-  const callerSockets = getSocketsForUser(callerId);
-
-  callerSockets.forEach((socketId) => {
-    io.to(socketId).emit("callRejected");
-    const callerSocket = io.sockets.sockets.get(socketId);
-    if (callerSocket) callerSocket.data.callTarget = null;
-  });
-  socket.data.callTarget = null;
-});
-
-// =====================
-// READ RECEIPTS
-// =====================
-
-socket.on(
-  "markAsRead",
-  async ({
-    messageId,
-    senderId,
-  }) => {
-    try {
-      const message =
-        await MessageModel.findById(
-          messageId
-        );
-
-      if (!message) return;
-
-      if (!message.readAt) {
-        message.readAt =
-          new Date();
-
-        await message.save();
-
-        const conversation =
-          await ConversationModel.findById(
-            message.conversationId
-          );
-
-        if (
-          conversation
-        ) {
-          conversation.unreadCounts.set(
-            userId,
-            0
-          );
-
-          await conversation.save();
-        }
-
-        const senderSockets =
-          getSocketsForUser(
-            senderId
-          );
-
-        senderSockets.forEach(
-          (socketId) => {
-            io.to(
-              socketId
-            ).emit(
-              "messageStatusUpdate",
-              {
-                messageId:
-                  message._id,
-                readAt:
-                  message.readAt,
-              }
-            );
-
-            io.to(
-              socketId
-            ).emit(
-              "conversationUpdated"
-            );
-          }
-        );
-
-        socket.emit(
-          "conversationUpdated"
-        );
-      }
-    } catch (error) {
-      console.error(
-        error.message
-      );
-    }
-  }
-);
-
-// =====================
-// TYPING
-// =====================
-
-socket.on(
-  "typing",
-  ({
-    conversationId,
-    receiverId,
-  }) => {
-    getSocketsForUser(
-      receiverId
-    ).forEach((socketId) => {
-      io.to(socketId).emit(
-        "userTyping",
-        {
-          conversationId,
-          userId,
-        }
-      );
-    });
-  }
-);
-
-socket.on(
-  "stopTyping",
-  ({
-    conversationId,
-    receiverId,
-  }) => {
-    getSocketsForUser(
-      receiverId
-    ).forEach((socketId) => {
-      io.to(socketId).emit(
-        "userStoppedTyping",
-        {
-          conversationId,
-          userId,
-        }
-      );
-    });
-  }
-);
-
-// =====================
-// CHECK ONLINE
-// =====================
-
-socket.on(
-  "checkUserOnline",
-  (
-    targetUserId,
-    callback
-  ) => {
-    callback(
-      isUserOnline(
-        targetUserId
-      )
-    );
-  }
-);
-
-// =====================
-// REFRESH CHAT LIST
-// =====================
-
-socket.on(
-  "refreshConversations",
-  () => {
-    socket.emit(
-      "conversationUpdated"
-    );
-  }
-);
-
-// =====================
-// DISCONNECT
-// =====================
-
-socket.on(
-  "disconnect",
-  async () => {
-    console.log(
-      `🔴 User disconnected: ${userId}`
-    );
-
-    // A browser refresh closes its socket without a final endCall event.
-    // Notify the other participant so their call UI does not get stuck.
-    if (socket.data.callTarget) {
-      getSocketsForUser(socket.data.callTarget).forEach((socketId) => {
+      sockets.forEach((socketId) => {
         io.to(socketId).emit("callEnded");
       });
+
       socket.data.callTarget = null;
-    }
+    });
 
-    if (
-      !userSocketMap[userId]
-    )
-      return;
+    socket.on("rejectCall", ({ callerId }) => {
+      const callerSockets = getSocketsForUser(callerId);
 
-    userSocketMap[userId] =
-      userSocketMap[
-        userId
-      ].filter(
-        (id) =>
-          id !== socket.id
-      );
+      callerSockets.forEach((socketId) => {
+        io.to(socketId).emit("callRejected");
+        const callerSocket = io.sockets.sockets.get(socketId);
+        if (callerSocket) callerSocket.data.callTarget = null;
+      });
+      socket.data.callTarget = null;
+    });
 
-    if (
-      userSocketMap[userId]
-        .length === 0
-    ) {
-      delete userSocketMap[
-        userId
-      ];
+    // =====================
+    // READ RECEIPTS
+    // =====================
 
-      const lastSeen =
-        new Date();
+    socket.on("markAsRead", async ({ messageId, senderId }) => {
+      try {
+        const message = await MessageModel.findById(messageId);
 
-      await UserModel.findByIdAndUpdate(
-        userId,
-        {
+        if (!message) return;
+
+        if (!message.readAt) {
+          message.readAt = new Date();
+
+          await message.save();
+
+          const conversation = await ConversationModel.findById(message.conversationId);
+
+          if (conversation) {
+            conversation.unreadCounts.set(userId, 0);
+
+            await conversation.save();
+          }
+
+          const senderSockets = getSocketsForUser(senderId);
+
+          senderSockets.forEach((socketId) => {
+            io.to(socketId).emit("messageStatusUpdate", {
+              messageId: message._id,
+              readAt: message.readAt,
+            });
+
+            io.to(socketId).emit("conversationUpdated");
+          });
+
+          socket.emit("conversationUpdated");
+        }
+      } catch (error) {
+        console.error(error.message);
+      }
+    });
+
+    // =====================
+    // TYPING
+    // =====================
+
+    socket.on("typing", ({ conversationId, receiverId }) => {
+      getSocketsForUser(receiverId).forEach((socketId) => {
+        io.to(socketId).emit("userTyping", {
+          conversationId,
+          userId,
+        });
+      });
+    });
+
+    socket.on("stopTyping", ({ conversationId, receiverId }) => {
+      getSocketsForUser(receiverId).forEach((socketId) => {
+        io.to(socketId).emit("userStoppedTyping", {
+          conversationId,
+          userId,
+        });
+      });
+    });
+
+    // =====================
+    // CHECK ONLINE
+    // =====================
+
+    socket.on("checkUserOnline", (targetUserId, callback) => {
+      callback(isUserOnline(targetUserId));
+    });
+
+    // =====================
+    // REFRESH CHAT LIST
+    // =====================
+
+    socket.on("refreshConversations", () => {
+      socket.emit("conversationUpdated");
+    });
+
+    // =====================
+    // DISCONNECT
+    // =====================
+
+    socket.on("disconnect", async () => {
+      console.log(`🔴 User disconnected: ${userId}`);
+
+      // A browser refresh closes its socket without a final endCall event.
+      // Notify the other participant so their call UI does not get stuck.
+      if (socket.data.callTarget) {
+        getSocketsForUser(socket.data.callTarget).forEach((socketId) => {
+          io.to(socketId).emit("callEnded");
+        });
+        socket.data.callTarget = null;
+      }
+
+      if (!userSocketMap[userId]) return;
+
+      userSocketMap[userId] = userSocketMap[userId].filter((id) => id !== socket.id);
+
+      if (userSocketMap[userId].length === 0) {
+        delete userSocketMap[userId];
+
+        const lastSeen = new Date();
+
+        await UserModel.findByIdAndUpdate(userId, {
           isOnline: false,
           lastSeen,
-        }
-      );
+        });
 
-      io.emit(
-        "userOffline",
-        {
+        io.emit("userOffline", {
           userId,
           lastSeen,
-        }
-      );
-    }
-  }
-);
-
-
-socket.on("addReaction", async ({ messageId, reaction }) => {
-  try {
-    const userId = socket.userId;
-
-    const message = await MessageModel.findById(messageId);
-
-    if (!message) return;
-
-    // A user has at most one reaction. Sending a null reaction (or selecting
-    // the same emoji again) removes it, matching WhatsApp's toggle behavior.
-    message.reactions = message.reactions.filter(
-      (r) => r.userId.toString() !== userId
-    );
-
-    if (reaction) {
-      message.reactions.push({
-        userId,
-        type: reaction,
-      });
-    }
-
-    await message.save();
-
-    const populated = await MessageModel.findById(messageId)
-      .populate("sender", "name avatar")
-      .populate("receiver", "name avatar");
-
-    // Broadcast from the stored message participants, not a client-provided
-    // receiver id. This keeps reaction updates in sync on every open device.
-    const participantIds = [message.sender, message.receiver].map((id) => id.toString());
-    [...new Set(participantIds)].forEach((participantId) => {
-      getSocketsForUser(participantId).forEach((socketId) => {
-        io.to(socketId).emit("messageReactionUpdated", populated);
-      });
-    });
-  } catch (err) {
-    console.log("reaction error", err.message);
-  }
-});
-
-// =====================
-// MESSAGE ACTIONS
-// =====================
-
-const populateMessage = (messageId) =>
-  MessageModel.findById(messageId)
-    .populate("sender", "name email avatar")
-    .populate("receiver", "name email avatar")
-    .populate({
-      path: "replyTo",
-      populate: { path: "sender", select: "name avatar" },
-    });
-
-const emitToMessageParticipants = (message, event, payload) => {
-  const participantIds = [message.sender._id || message.sender, message.receiver._id || message.receiver]
-    .map((id) => id.toString());
-  [...new Set(participantIds)].forEach((participantId) => {
-    getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit(event, payload));
-  });
-};
-
-socket.on("editMessage", async ({ messageId, text }, callback) => {
-  try {
-    const message = await MessageModel.findById(messageId);
-    if (!message || message.sender.toString() !== userId || message.isDeleted) {
-      return callback?.({ success: false, message: "Message cannot be edited" });
-    }
-    if (!text?.trim()) return callback?.({ success: false, message: "Message cannot be empty" });
-
-    message.text = text.trim();
-    message.editedAt = new Date();
-    await message.save();
-    const populated = await populateMessage(message._id);
-    emitToMessageParticipants(populated, "messageUpdated", populated);
-    callback?.({ success: true, message: populated });
-  } catch (error) {
-    callback?.({ success: false, message: "Could not edit message" });
-  }
-});
-
-socket.on("deleteMessage", async ({ messageId, scope }, callback) => {
-  try {
-    const message = await MessageModel.findById(messageId);
-    const isParticipant = message && [message.sender.toString(), message.receiver.toString()].includes(userId);
-    if (!isParticipant) return callback?.({ success: false, message: "Message not found" });
-
-    if (scope === "everyone") {
-      if (message.sender.toString() !== userId) {
-        return callback?.({ success: false, message: "Only the sender can delete for everyone" });
+        });
       }
-      message.isDeleted = true;
-      message.text = "";
-      message.mediaUrl = "";
-      message.replyTo = null;
-      await message.save();
-      const populated = await populateMessage(message._id);
-      emitToMessageParticipants(populated, "messageUpdated", populated);
-      return callback?.({ success: true });
-    }
+    });
 
-    if (!message.deletedFor.some((id) => id.toString() === userId)) {
-      message.deletedFor.push(userId);
-      await message.save();
-    }
-    socket.emit("messageDeletedForMe", { messageId });
-    callback?.({ success: true });
-  } catch (error) {
-    callback?.({ success: false, message: "Could not delete message" });
-  }
-});
+    socket.on("addReaction", async ({ messageId, reaction }) => {
+      try {
+        const userId = socket.userId;
 
+        const message = await MessageModel.findById(messageId);
 
-});
+        if (!message) return;
 
-return io;
+        // A user has at most one reaction. Sending a null reaction (or selecting
+        // the same emoji again) removes it, matching WhatsApp's toggle behavior.
+        message.reactions = message.reactions.filter((r) => r.userId.toString() !== userId);
+
+        if (reaction) {
+          message.reactions.push({
+            userId,
+            type: reaction,
+          });
+        }
+
+        await message.save();
+
+        const populated = await MessageModel.findById(messageId)
+          .populate("sender", "name avatar")
+          .populate("receiver", "name avatar");
+
+        // Broadcast from the stored message participants, not a client-provided
+        // receiver id. This keeps reaction updates in sync on every open device.
+        const participantIds = [message.sender, message.receiver].map((id) => id.toString());
+        [...new Set(participantIds)].forEach((participantId) => {
+          getSocketsForUser(participantId).forEach((socketId) => {
+            io.to(socketId).emit("messageReactionUpdated", populated);
+          });
+        });
+      } catch (err) {
+        console.log("reaction error", err.message);
+      }
+    });
+
+    // =====================
+    // MESSAGE ACTIONS
+    // =====================
+
+    const populateMessage = (messageId) =>
+      MessageModel.findById(messageId)
+        .populate("sender", "name email avatar")
+        .populate("receiver", "name email avatar")
+        .populate({
+          path: "replyTo",
+          populate: { path: "sender", select: "name avatar" },
+        });
+
+    const emitToMessageParticipants = (message, event, payload) => {
+      const participantIds = [message.sender._id || message.sender, message.receiver._id || message.receiver].map(
+        (id) => id.toString()
+      );
+      [...new Set(participantIds)].forEach((participantId) => {
+        getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit(event, payload));
+      });
+    };
+
+    socket.on("editMessage", async ({ messageId, text }, callback) => {
+      try {
+        const message = await MessageModel.findById(messageId);
+        if (!message || message.sender.toString() !== userId || message.isDeleted) {
+          return callback?.({ success: false, message: "Message cannot be edited" });
+        }
+        if (!text?.trim()) return callback?.({ success: false, message: "Message cannot be empty" });
+
+        message.text = text.trim();
+        message.editedAt = new Date();
+        await message.save();
+        const populated = await populateMessage(message._id);
+        emitToMessageParticipants(populated, "messageUpdated", populated);
+        callback?.({ success: true, message: populated });
+      } catch (error) {
+        callback?.({ success: false, message: "Could not edit message" });
+      }
+    });
+
+    socket.on("deleteMessage", async ({ messageId, scope }, callback) => {
+      try {
+        const message = await MessageModel.findById(messageId);
+        const isParticipant = message && [message.sender.toString(), message.receiver.toString()].includes(userId);
+        if (!isParticipant) return callback?.({ success: false, message: "Message not found" });
+
+        if (scope === "everyone") {
+          if (message.sender.toString() !== userId) {
+            return callback?.({ success: false, message: "Only the sender can delete for everyone" });
+          }
+          message.isDeleted = true;
+          message.text = "";
+          message.mediaUrl = "";
+          message.replyTo = null;
+          await message.save();
+          const populated = await populateMessage(message._id);
+          emitToMessageParticipants(populated, "messageUpdated", populated);
+          return callback?.({ success: true });
+        }
+
+        if (!message.deletedFor.some((id) => id.toString() === userId)) {
+          message.deletedFor.push(userId);
+          await message.save();
+        }
+        socket.emit("messageDeletedForMe", { messageId });
+        callback?.({ success: true });
+      } catch (error) {
+        callback?.({ success: false, message: "Could not delete message" });
+      }
+    });
+  });
+
+  return io;
 }
 
-export {
-initSocket,
-getIO,
-getSocketsForUser,
-isUserOnline,
-};
+export { initSocket, getIO, getSocketsForUser, isUserOnline };
