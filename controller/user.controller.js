@@ -6,6 +6,22 @@ import verifyEmailTemplate from "../utils/verifyEmailTemplate.js";
 import generatedAccessToken from "../utils/generatedAccessToken.js";
 import generatedRefreshToken from "../utils/generatedRefreshToken.js";
 
+// Browsers reject SameSite=Lax cookies on XHR requests from the separately
+// hosted frontend. HTTPS deployments must use Secure + SameSite=None; local
+// HTTP development keeps the more convenient Lax configuration.
+const authCookieOptions = () => {
+  const deployed =
+    process.env.NODE_ENV === "production" ||
+    process.env.CLIENT_URL?.startsWith("https://");
+
+  return {
+    httpOnly: true,
+    secure: deployed,
+    sameSite: deployed ? "none" : "lax",
+    path: "/",
+  };
+};
+
 // Register
 export async function registerUserController(req, res) {
   try {
@@ -153,11 +169,7 @@ export async function loginUserController(req, res) {
       last_login_date: new Date(),
     });
 
-    const cookiesOption = {
-      httpOnly: true,
-      secure: false,
-      sameSite: "Lax",
-    };
+    const cookiesOption = authCookieOptions();
 
     res.cookie("accessToken", accessToken, cookiesOption);
 
@@ -189,7 +201,7 @@ export async function loginUserController(req, res) {
 export async function logoutController(req, res) {
   try {
     const userId = req.userId;
-    const cookiesOption = { httpOnly: true, secure: false, sameSite: "Lax" };
+    const cookiesOption = authCookieOptions();
     res.clearCookie("accessToken", cookiesOption);
     res.clearCookie("refreshToken", cookiesOption);
     if (userId) {
@@ -415,13 +427,19 @@ export async function refreshToken(req, res) {
         .json({ message: "Invalid token", error: true, success: false });
     }
     const verifyToken = jwt.verify(token, process.env.SECRET_KEY_REFRESH_TOKEN);
-    if (!verifyToken) {
-      return res
-        .status(401)
-        .json({ message: "Token expired", error: true, success: false });
+
+    // Reject a refresh token that was superseded by a later login or logout.
+    const user = await UserModel.findById(verifyToken.id).select("refresh_token");
+    if (!user || user.refresh_token !== token) {
+      return res.status(401).json({
+        message: "Refresh token is no longer valid",
+        error: true,
+        success: false,
+      });
     }
+
     const newAccessToken = await generatedAccessToken(verifyToken.id);
-    const cookiesOption = { httpOnly: true, secure: false, sameSite: "Lax" };
+    const cookiesOption = authCookieOptions();
     res.cookie("accessToken", newAccessToken, cookiesOption);
     return res.json({
       message: "New token generated",
@@ -430,6 +448,13 @@ export async function refreshToken(req, res) {
       error: false,
     });
   } catch (error) {
+    if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
+      return res.status(401).json({
+        message: "Invalid or expired refresh token",
+        error: true,
+        success: false,
+      });
+    }
     return res
       .status(500)
       .json({ message: error.message, error: true, success: false });

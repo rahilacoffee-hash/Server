@@ -29,6 +29,9 @@ const corsOptions = {
 };
 
 const app = express();
+// Render and other platforms terminate TLS before forwarding to Express.
+// Trusting that proxy lets secure cross-site cookies work correctly.
+app.set("trust proxy", 1);
 app.use(cors(corsOptions));
 app.options(/.*/, cors(corsOptions));
 app.use(express.json());
