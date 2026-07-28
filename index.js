@@ -9,6 +9,7 @@ import { initSocket } from "./config/Socketserver.js";
 import chatRouter from "./route/Chat.route.js";
 import uploadRouter from "./route/Upload.route.js";
 import statusRouter from "./route/Status.route.js";
+import callRouter from "./route/Call.route.js";
 
 dotenv.config();
 
@@ -48,6 +49,7 @@ app.use("/api/user", userRouter);
 app.use("/api/chat", chatRouter);
 app.use("/api/upload", uploadRouter);
 app.use("/api/status", statusRouter);
+app.use("/api/call", callRouter);
 
 // Socket.io needs a raw http server to attach to — Express's app.listen()
 // creates one internally, but we need direct access to pass it to Socket.io.
