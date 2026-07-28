@@ -54,7 +54,7 @@ export async function markStatusViewedController(req, res) {
     const status = await StatusModel.findOneAndUpdate(
       { _id: req.params.statusId, expiresAt: { $gt: new Date() } },
       { $addToSet: { viewedBy: req.userId } },
-      { new: true }
+      { returnDocument: "after" }
     );
     if (!status) return res.status(404).json({ message: "Status not found", success: false, error: true });
     return res.json({ data: status, success: true, error: false });

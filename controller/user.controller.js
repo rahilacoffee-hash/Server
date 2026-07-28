@@ -258,7 +258,7 @@ export async function updateUserController(req, res) {
         mobile,
       },
       {
-        new: true,
+        returnDocument: "after",
       },
     ).select("-password -refresh_token");
 
