@@ -7,6 +7,7 @@ export async function getConversationsController(req, res) {
 
     const conversations = await ConversationModel.find({
       participants: userId,
+      hiddenFor: { $ne: userId },
     })
       .populate("participants", "name email avatar isOnline lastSeen")
       .populate({
@@ -209,6 +210,20 @@ export async function deleteChatForMeController(req, res) {
       { conversationId: conversation._id },
       { $addToSet: { deletedFor: req.userId } },
     );
+    return res.json({ success: true, error: false });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: true, message: error.message });
+  }
+}
+
+export async function hideConversationForUserController(req, res) {
+  try {
+    const conversation = await ConversationModel.findOneAndUpdate(
+      { _id: req.params.conversationId, participants: req.userId },
+      { $addToSet: { hiddenFor: req.userId } },
+      { new: true },
+    );
+    if (!conversation) return res.status(404).json({ success: false, error: true, message: "Conversation not found" });
     return res.json({ success: true, error: false });
   } catch (error) {
     return res.status(500).json({ success: false, error: true, message: error.message });

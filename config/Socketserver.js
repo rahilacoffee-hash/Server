@@ -157,6 +157,10 @@ function initSocket(httpServer) {
           });
 
         conversation.lastMessage = message._id;
+        // A new message makes a previously deleted chat visible again.
+        conversation.hiddenFor = (conversation.hiddenFor || []).filter(
+          (hiddenUserId) => !recipientIds.includes(hiddenUserId.toString()),
+        );
 
         recipientIds.forEach((recipientId) => {
           const unread = conversation.unreadCounts.get(recipientId) || 0;
