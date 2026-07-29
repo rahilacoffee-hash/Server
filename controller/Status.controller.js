@@ -7,14 +7,16 @@ export async function createStatusController(req, res) {
   try {
     const { text = "", mediaUrl = "", type = "text" } = req.body;
     if (!text.trim() && !mediaUrl) {
-      return res.status(400).json({ message: "Add text or an image", success: false, error: true });
+      return res.status(400).json({ message: "Add text, an image, or a video", success: false, error: true });
     }
+
+    const mediaType = type === "video" ? "video" : type === "image" ? "image" : "text";
 
     const status = await StatusModel.create({
       author: req.userId,
       text: text.trim(),
       mediaUrl,
-      type: mediaUrl ? "image" : type,
+      type: mediaUrl ? mediaType : "text",
       expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
     });
     const populated = await status.populate("author", "name avatar");
