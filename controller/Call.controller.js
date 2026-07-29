@@ -33,7 +33,12 @@ export const getIceServersController = (req, res) => {
     0,
     Math.max(0, maxIceUrls - turnUrls.length),
   );
-  const turnSecret = process.env.TURN_SHARED_SECRET;
+  // Metered and most managed TURN services use the supplied static username
+  // and credential. Only enable coturn's HMAC/shared-secret credentials when
+  // explicitly requested; a leftover TURN_SHARED_SECRET must never override
+  // valid managed-provider credentials.
+  const useSharedSecret = process.env.TURN_AUTH_MODE === "shared-secret";
+  const turnSecret = useSharedSecret ? process.env.TURN_SHARED_SECRET : "";
   const turnUsername = process.env.TURN_USERNAME;
   const turnCredential = process.env.TURN_CREDENTIAL;
   const ttlSeconds = Math.min(

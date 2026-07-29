@@ -38,21 +38,14 @@ uploadRouter.post("/", auth, upload.single("file"), async (req, res) => {
 
     const isAudio = req.file.mimetype.startsWith("audio");
 
-    // Pick the right extension so Cloudinary's raw delivery URL ends with
-    // it — without an extension, raw resources can be served with a
-    // generic/incorrect Content-Type, which some browsers refuse to
-    // decode as audio at all.
-    const extension = req.file.mimetype.includes("webm")
-      ? "webm"
-      : req.file.mimetype.includes("mp4")
-      ? "mp4"
-      : "bin";
-
+    // Cloudinary streams audio through its `video` asset type. Uploading it
+    // as `raw` can result in a generic download response that browsers cannot
+    // reliably range-request or decode in an <audio> element.
     const uploadOptions = isAudio
       ? {
           folder: "chatverse/chat-media",
-          resource_type: "raw",
-          public_id: `voice-${Date.now()}.${extension}`,
+          resource_type: "video",
+          public_id: `voice-${Date.now()}`,
         }
       : {
           folder: "chatverse/chat-media",
