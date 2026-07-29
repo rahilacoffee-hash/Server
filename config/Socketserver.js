@@ -6,6 +6,7 @@ import ConversationModel from "../models/Conversation.model.js";
 import MessageModel from "../models/Message.model.js";
 
 const userSocketMap = {};
+const groupCalls = new Map();
 
 let io;
 
@@ -264,6 +265,48 @@ function initSocket(httpServer) {
         if (callerSocket) callerSocket.data.callTarget = null;
       });
       socket.data.callTarget = null;
+    });
+
+    // Group calls use a WebRTC mesh: the server only authorizes and forwards
+    // signaling, while every participant makes a peer connection to the others.
+    socket.on("startGroupCall", async ({ conversationId, callType = "voice" }, callback) => {
+      try {
+        const conversation = await ConversationModel.findOne({ _id: conversationId, isGroup: true, participants: userId }).populate("participants", "name");
+        if (!conversation) return callback?.({ success: false, message: "Group not found." });
+        const caller = await UserModel.findById(userId).select("name");
+
+        const sessionId = `${conversationId}:${Date.now()}:${socket.id}`;
+        const members = conversation.participants.map((member) => ({ id: member._id.toString(), name: member.name }));
+        groupCalls.set(sessionId, { members: new Set(members.map((member) => member.id)), joined: new Set([userId]) });
+        members.filter((member) => member.id !== userId).forEach((member) => getSocketsForUser(member.id).forEach((socketId) => io.to(socketId).emit("incomingGroupCall", { sessionId, conversationId, callerId: userId, callerName: caller?.name || "Someone", callType, groupName: conversation.groupName || "Group call" })));
+        callback?.({ success: true, sessionId, members });
+      } catch (error) {
+        console.error("Could not start group call", error);
+        callback?.({ success: false, message: "Could not start group call." });
+      }
+    });
+
+    socket.on("joinGroupCall", ({ sessionId }, callback) => {
+      const groupCall = groupCalls.get(sessionId);
+      if (!groupCall || !groupCall.members.has(userId)) return callback?.({ success: false, message: "This group call is no longer available." });
+      const participants = [...groupCall.joined];
+      groupCall.joined.add(userId);
+      participants.forEach((participantId) => getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit("groupCallParticipantJoined", { sessionId, userId })));
+      callback?.({ success: true, participants });
+    });
+
+    socket.on("groupCallSignal", ({ sessionId, targetUserId, signal }, callback) => {
+      const groupCall = groupCalls.get(sessionId);
+      if (!groupCall?.joined.has(userId) || !groupCall.joined.has(targetUserId)) return callback?.({ success: false });
+      getSocketsForUser(targetUserId).forEach((socketId) => io.to(socketId).emit("groupCallSignal", { sessionId, fromUserId: userId, signal }));
+      callback?.({ success: true });
+    });
+
+    socket.on("endGroupCall", ({ sessionId }) => {
+      const groupCall = groupCalls.get(sessionId);
+      if (!groupCall?.joined.has(userId)) return;
+      [...groupCall.joined].forEach((participantId) => getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit("groupCallEnded", { sessionId })));
+      groupCalls.delete(sessionId);
     });
 
     // =====================

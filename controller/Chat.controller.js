@@ -195,6 +195,26 @@ export async function getMessagesController(req, res) {
   }
 }
 
+export async function deleteChatForMeController(req, res) {
+  try {
+    const conversation = await ConversationModel.findOne({
+      _id: req.params.conversationId,
+      participants: req.userId,
+    });
+    if (!conversation) {
+      return res.status(404).json({ success: false, error: true, message: "Conversation not found" });
+    }
+
+    await MessageModel.updateMany(
+      { conversationId: conversation._id },
+      { $addToSet: { deletedFor: req.userId } },
+    );
+    return res.json({ success: true, error: false });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: true, message: error.message });
+  }
+}
+
 export async function createMessageController(req, res) {
   try {
     const userId = req.userId;
