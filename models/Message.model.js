@@ -30,6 +30,16 @@ const messageSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    // View-once media is removed from message responses after the recipient
+    // opens it. The URL is deliberately retained only until that first view.
+    viewOnce: {
+      type: Boolean,
+      default: false,
+    },
+    viewedAt: {
+      type: Date,
+      default: null,
+    },
     // file name + size, only relevant for type: "document"
     fileName: {
       type: String,

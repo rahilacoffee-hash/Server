@@ -110,6 +110,7 @@ function initSocket(httpServer) {
           type = "text",
           text = "",
           mediaUrl = "",
+          viewOnce = false,
           fileName = "",
           fileSize = 0,
           replyTo = null,
@@ -143,6 +144,7 @@ function initSocket(httpServer) {
           type,
           text,
           mediaUrl,
+          viewOnce: Boolean(viewOnce) && ["image", "video", "audio"].includes(type),
           fileName,
           fileSize,
           replyTo,
@@ -281,7 +283,7 @@ function initSocket(httpServer) {
 
         const sessionId = `${conversationId}:${Date.now()}:${socket.id}`;
         const members = conversation.participants.map((member) => ({ id: member._id.toString(), name: member.name }));
-        groupCalls.set(sessionId, { members: new Set(members.map((member) => member.id)), joined: new Set([userId]) });
+        groupCalls.set(sessionId, { conversationId, callType, groupName: conversation.groupName || "Group call", members: new Set(members.map((member) => member.id)), joined: new Set([userId]) });
         members.filter((member) => member.id !== userId).forEach((member) => getSocketsForUser(member.id).forEach((socketId) => io.to(socketId).emit("incomingGroupCall", { sessionId, conversationId, callerId: userId, callerName: caller?.name || "Someone", callType, groupName: conversation.groupName || "Group call" })));
         callback?.({ success: true, sessionId, members });
       } catch (error) {
@@ -299,6 +301,13 @@ function initSocket(httpServer) {
       callback?.({ success: true, participants });
     });
 
+    socket.on("getActiveGroupCall", ({ conversationId }, callback) => {
+      const entry = [...groupCalls.entries()].find(([, groupCall]) => groupCall.conversationId === conversationId && groupCall.members.has(userId) && groupCall.joined.size > 0);
+      if (!entry) return callback?.({ success: true, call: null });
+      const [sessionId, groupCall] = entry;
+      callback?.({ success: true, call: { sessionId, conversationId, callType: groupCall.callType, groupName: groupCall.groupName, participants: [...groupCall.joined] } });
+    });
+
     socket.on("groupCallSignal", ({ sessionId, targetUserId, signal }, callback) => {
       const groupCall = groupCalls.get(sessionId);
       if (!groupCall?.joined.has(userId) || !groupCall.joined.has(targetUserId)) return callback?.({ success: false });
@@ -311,6 +320,13 @@ function initSocket(httpServer) {
       if (!groupCall?.joined.has(userId)) return;
       [...groupCall.joined].forEach((participantId) => getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit("groupCallEnded", { sessionId })));
       groupCalls.delete(sessionId);
+    });
+
+    socket.on("leaveGroupCall", ({ sessionId }) => {
+      const groupCall = groupCalls.get(sessionId);
+      if (!groupCall?.joined.delete(userId)) return;
+      [...groupCall.joined].forEach((participantId) => getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit("groupCallParticipantLeft", { sessionId, userId })));
+      if (!groupCall.joined.size) groupCalls.delete(sessionId);
     });
 
     // =====================
@@ -536,6 +552,23 @@ function initSocket(httpServer) {
         callback?.({ success: true });
       } catch (error) {
         callback?.({ success: false, message: "Could not delete message" });
+      }
+    });
+
+    socket.on("viewOnceMessage", async ({ messageId }, callback) => {
+      try {
+        const message = await MessageModel.findById(messageId);
+        if (!message || !message.viewOnce || message.receiver.toString() !== userId) {
+          return callback?.({ success: false, message: "This media is unavailable" });
+        }
+        message.viewedAt = new Date();
+        message.mediaUrl = "";
+        await message.save();
+        const populated = await populateMessage(message._id);
+        emitToMessageParticipants(populated, "messageUpdated", populated);
+        callback?.({ success: true, message: populated });
+      } catch {
+        callback?.({ success: false, message: "Could not open this media" });
       }
     });
   });
