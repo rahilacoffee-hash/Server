@@ -1,24 +1,51 @@
 import ConversationModel from "../models/Conversation.model.js";
 import MessageModel from "../models/Message.model.js";
 import UserModel from "../models/user.model.js";
+import ExplorePostModel from "../models/ExplorePost.model.js";
 
 export async function getExploreController(req, res) {
   try {
     const userId = req.userId;
-    const [communities, people, recentMessages] = await Promise.all([
+    const [communities, people, posts] = await Promise.all([
       ConversationModel.find({ isGroup: true, participants: { $ne: userId } })
         .sort({ updatedAt: -1 }).limit(12)
         .populate("participants", "name avatar").lean(),
       UserModel.find({ _id: { $ne: userId } }).sort({ createdAt: -1 }).limit(20)
         .select("name avatar bio followers following").lean(),
-      MessageModel.find({ sender: userId, isDeleted: false, deletedFor: { $ne: userId } })
-        .sort({ createdAt: -1 }).limit(12)
-        .populate("sender", "name avatar").populate("conversationId", "groupName isGroup").lean(),
+      ExplorePostModel.find().sort({ createdAt: -1 }).limit(30).populate("author", "name avatar").lean(),
     ]);
-    return res.json({ success: true, error: false, data: { communities, people, posts: recentMessages } });
+    return res.json({ success: true, error: false, data: { communities, people, posts } });
   } catch (error) {
     return res.status(500).json({ success: false, error: true, message: error.message });
   }
+}
+
+export async function createExplorePostController(req, res) {
+  try {
+    const { text, type = "Post", mediaUrl = "", pollOptions = [] } = req.body;
+    if (!text?.trim()) return res.status(400).json({ success: false, error: true, message: "Write something before posting" });
+    const post = await ExplorePostModel.create({ author: req.userId, text: text.trim(), type, mediaUrl, pollOptions });
+    return res.status(201).json({ success: true, error: false, data: await ExplorePostModel.findById(post._id).populate("author", "name avatar") });
+  } catch (error) { return res.status(500).json({ success: false, error: true, message: error.message }); }
+}
+
+export async function askExploreAiController(req, res) {
+  try {
+    if (!process.env.GROQ_API_KEY) return res.status(503).json({ success: false, error: true, message: "AI is not configured. Add GROQ_API_KEY to the server environment." });
+    const { question = "", post = {} } = req.body;
+    if (!question.trim() && !post.text) return res.status(400).json({ success: false, error: true, message: "Ask a question about a post" });
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile", temperature: 0.4, max_tokens: 500, messages: [
+        { role: "system", content: "You are ChatVerse AI. Give helpful, concise answers about the supplied community post. Do not invent facts not present in it." },
+        { role: "user", content: `Post by ${post.author || "a creator"} (${post.type || "post"}): ${post.text || ""}\n\nQuestion: ${question || "Summarize this post and suggest a thoughtful response."}` },
+      ] }),
+    });
+    const body = await response.json();
+    if (!response.ok) return res.status(response.status).json({ success: false, error: true, message: body?.error?.message || "AI could not respond" });
+    return res.json({ success: true, error: false, data: { answer: body.choices?.[0]?.message?.content || "I could not generate an answer." } });
+  } catch (error) { return res.status(500).json({ success: false, error: true, message: "AI request failed" }); }
 }
 
 export async function getConversationsController(req, res) {

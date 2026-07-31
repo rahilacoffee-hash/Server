@@ -3,6 +3,8 @@ import auth from "../middlewares/auth.js";
 import {
   getConversationsController,
   getExploreController,
+  askExploreAiController,
+  createExplorePostController,
   getOrCreateConversationController,
   getMessagesController,
   createMessageController,
@@ -19,6 +21,8 @@ const chatRouter = Router();
 
 chatRouter.get("/conversations", auth, getConversationsController);
 chatRouter.get("/explore", auth, getExploreController);
+chatRouter.post("/ai/ask", auth, askExploreAiController);
+chatRouter.post("/explore/posts", auth, createExplorePostController);
 chatRouter.post("/conversations", auth, getOrCreateConversationController);
 chatRouter.post("/conversations/group", auth, createGroupConversationController);
 chatRouter.post("/conversations/:conversationId/members", auth, addGroupMembersController);
