@@ -1,4 +1,6 @@
 import UserModel from "../models/user.model.js";
+import StatusModel from "../models/Status.model.js";
+import ConversationModel from "../models/Conversation.model.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import sendEmail from "../config/sendEmail.js";
@@ -219,9 +221,13 @@ export async function logoutController(req, res) {
 
 export async function userDetailsController(req, res) {
   try {
-    const user = await UserModel.findById(req.userId)
+    const [user, postCount, conversations] = await Promise.all([
+      UserModel.findById(req.userId)
       .select("-password -refresh_token -otp")
-      .lean();
+      .lean(),
+      StatusModel.countDocuments({ author: req.userId, expiresAt: { $gt: new Date() } }),
+      ConversationModel.find({ participants: req.userId }).select("unreadCounts").lean(),
+    ]);
 
     if (!user) {
       return res.status(404).json({
@@ -231,8 +237,11 @@ export async function userDetailsController(req, res) {
       });
     }
 
+    const unreadNotifications = conversations.reduce(
+      (total, conversation) => total + Number(conversation.unreadCounts?.[req.userId] || 0), 0
+    );
     return res.status(200).json({
-      data: user,
+      data: { ...user, postCount, unreadNotifications },
       success: true,
       error: false,
     });
