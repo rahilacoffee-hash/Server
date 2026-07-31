@@ -513,6 +513,7 @@ function initSocket(httpServer) {
         }
         if (!text?.trim()) return callback?.({ success: false, message: "Message cannot be empty" });
 
+        message.editHistory.push({ text: message.text, editedAt: new Date() });
         message.text = text.trim();
         message.editedAt = new Date();
         await message.save();
@@ -522,6 +523,20 @@ function initSocket(httpServer) {
       } catch (error) {
         callback?.({ success: false, message: "Could not edit message" });
       }
+    });
+
+    socket.on("toggleStarMessage", async ({ messageId }, callback) => {
+      try {
+        const message = await MessageModel.findById(messageId);
+        const participant = message && [message.sender.toString(), message.receiver.toString()].includes(userId);
+        if (!participant) return callback?.({ success: false, message: "Message not found" });
+        const alreadyStarred = message.starredBy.some((id) => id.toString() === userId);
+        message.starredBy = alreadyStarred ? message.starredBy.filter((id) => id.toString() !== userId) : [...message.starredBy, userId];
+        await message.save();
+        const populated = await populateMessage(message._id);
+        emitToMessageParticipants(populated, "messageUpdated", populated);
+        callback?.({ success: true, message: populated });
+      } catch { callback?.({ success: false, message: "Could not save message" }); }
     });
 
     socket.on("deleteMessage", async ({ messageId, scope }, callback) => {

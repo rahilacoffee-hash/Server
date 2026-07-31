@@ -76,6 +76,11 @@ const messageSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    editHistory: [{
+      text: { type: String, required: true },
+      editedAt: { type: Date, required: true },
+    }],
+    starredBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     isDeleted: {
       type: Boolean,
       default: false,
