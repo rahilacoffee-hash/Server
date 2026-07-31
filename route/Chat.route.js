@@ -2,6 +2,7 @@ import { Router } from "express";
 import auth from "../middlewares/auth.js";
 import {
   getConversationsController,
+  getExploreController,
   getOrCreateConversationController,
   getMessagesController,
   createMessageController,
@@ -17,6 +18,7 @@ import {
 const chatRouter = Router();
 
 chatRouter.get("/conversations", auth, getConversationsController);
+chatRouter.get("/explore", auth, getExploreController);
 chatRouter.post("/conversations", auth, getOrCreateConversationController);
 chatRouter.post("/conversations/group", auth, createGroupConversationController);
 chatRouter.post("/conversations/:conversationId/members", auth, addGroupMembersController);

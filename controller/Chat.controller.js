@@ -1,5 +1,25 @@
 import ConversationModel from "../models/Conversation.model.js";
 import MessageModel from "../models/Message.model.js";
+import UserModel from "../models/user.model.js";
+
+export async function getExploreController(req, res) {
+  try {
+    const userId = req.userId;
+    const [communities, people, recentMessages] = await Promise.all([
+      ConversationModel.find({ isGroup: true, participants: { $ne: userId } })
+        .sort({ updatedAt: -1 }).limit(12)
+        .populate("participants", "name avatar").lean(),
+      UserModel.find({ _id: { $ne: userId } }).sort({ createdAt: -1 }).limit(20)
+        .select("name avatar bio followers following").lean(),
+      MessageModel.find({ sender: userId, isDeleted: false, deletedFor: { $ne: userId } })
+        .sort({ createdAt: -1 }).limit(12)
+        .populate("sender", "name avatar").populate("conversationId", "groupName isGroup").lean(),
+    ]);
+    return res.json({ success: true, error: false, data: { communities, people, posts: recentMessages } });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: true, message: error.message });
+  }
+}
 
 export async function getConversationsController(req, res) {
   try {
