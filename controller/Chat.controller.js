@@ -10,6 +10,8 @@ export async function getConversationsController(req, res) {
       hiddenFor: { $ne: userId },
     })
       .populate("participants", "name email avatar isOnline lastSeen")
+      .populate("admins", "name avatar")
+      .populate("createdBy", "name avatar")
       .populate({
         path: "lastMessage",
         populate: [
@@ -100,16 +102,61 @@ export async function createGroupConversationController(req, res) {
       participants: participantSet,
       isGroup: true,
       groupName: name.trim(),
+      createdBy: req.userId,
       admins: [req.userId],
     });
     const populated = await ConversationModel.findById(conversation._id)
       .populate("participants", "name email avatar isOnline lastSeen")
-      .populate("admins", "name avatar");
+      .populate("admins", "name avatar")
+      .populate("createdBy", "name avatar");
 
     return res.status(201).json({ success: true, error: false, data: populated });
   } catch (error) {
     return res.status(500).json({ success: false, error: true, message: error.message });
   }
+}
+
+const groupPopulate = (query) => query
+  .populate("participants", "name email avatar isOnline lastSeen")
+  .populate("admins", "name avatar")
+  .populate("createdBy", "name avatar");
+
+export async function updateGroupController(req, res) {
+  try {
+    const conversation = await ConversationModel.findOne({ _id: req.params.conversationId, isGroup: true, admins: req.userId });
+    if (!conversation) return res.status(404).json({ success: false, error: true, message: "Group not found or you are not an admin" });
+    const { groupName, groupAvatar } = req.body;
+    if (typeof groupName === "string" && groupName.trim()) conversation.groupName = groupName.trim().slice(0, 100);
+    if (typeof groupAvatar === "string") conversation.groupAvatar = groupAvatar;
+    await conversation.save();
+    return res.json({ success: true, error: false, data: await groupPopulate(ConversationModel.findById(conversation._id)) });
+  } catch (error) { return res.status(500).json({ success: false, error: true, message: error.message }); }
+}
+
+export async function removeGroupMemberController(req, res) {
+  try {
+    const conversation = await ConversationModel.findOne({ _id: req.params.conversationId, isGroup: true, admins: req.userId });
+    const memberId = req.params.memberId;
+    if (!conversation) return res.status(404).json({ success: false, error: true, message: "Group not found or you are not an admin" });
+    if (!conversation.participants.some((id) => String(id) === memberId)) return res.status(404).json({ success: false, error: true, message: "Member not found" });
+    if (String(conversation.createdBy || conversation.admins[0]) === memberId) return res.status(400).json({ success: false, error: true, message: "The group creator cannot be removed" });
+    conversation.participants = conversation.participants.filter((id) => String(id) !== memberId);
+    conversation.admins = conversation.admins.filter((id) => String(id) !== memberId);
+    await conversation.save();
+    return res.json({ success: true, error: false, data: await groupPopulate(ConversationModel.findById(conversation._id)) });
+  } catch (error) { return res.status(500).json({ success: false, error: true, message: error.message }); }
+}
+
+export async function promoteGroupAdminController(req, res) {
+  try {
+    const conversation = await ConversationModel.findOne({ _id: req.params.conversationId, isGroup: true, admins: req.userId });
+    const memberId = req.params.memberId;
+    if (!conversation) return res.status(404).json({ success: false, error: true, message: "Group not found or you are not an admin" });
+    if (!conversation.participants.some((id) => String(id) === memberId)) return res.status(400).json({ success: false, error: true, message: "Only group members can be made admins" });
+    if (!conversation.admins.some((id) => String(id) === memberId)) conversation.admins.push(memberId);
+    await conversation.save();
+    return res.json({ success: true, error: false, data: await groupPopulate(ConversationModel.findById(conversation._id)) });
+  } catch (error) { return res.status(500).json({ success: false, error: true, message: error.message }); }
 }
 
 export async function addGroupMembersController(req, res) {
@@ -124,7 +171,10 @@ export async function addGroupMembersController(req, res) {
 
     conversation.participants = [...new Set([...conversation.participants.map(String), ...participantIds.map(String)])];
     await conversation.save();
-    const populated = await ConversationModel.findById(conversation._id).populate("participants", "name email avatar isOnline lastSeen");
+    const populated = await ConversationModel.findById(conversation._id)
+      .populate("participants", "name email avatar isOnline lastSeen")
+      .populate("admins", "name avatar")
+      .populate("createdBy", "name avatar");
     return res.json({ success: true, error: false, data: populated });
   } catch (error) {
     return res.status(500).json({ success: false, error: true, message: error.message });

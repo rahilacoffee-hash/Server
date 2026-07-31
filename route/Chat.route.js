@@ -7,6 +7,9 @@ import {
   createMessageController,
   createGroupConversationController,
   addGroupMembersController,
+  updateGroupController,
+  removeGroupMemberController,
+  promoteGroupAdminController,
   deleteChatForMeController,
   hideConversationForUserController,
 } from "../controller/Chat.controller.js";
@@ -17,6 +20,9 @@ chatRouter.get("/conversations", auth, getConversationsController);
 chatRouter.post("/conversations", auth, getOrCreateConversationController);
 chatRouter.post("/conversations/group", auth, createGroupConversationController);
 chatRouter.post("/conversations/:conversationId/members", auth, addGroupMembersController);
+chatRouter.patch("/conversations/:conversationId/group", auth, updateGroupController);
+chatRouter.delete("/conversations/:conversationId/members/:memberId", auth, removeGroupMemberController);
+chatRouter.post("/conversations/:conversationId/members/:memberId/admin", auth, promoteGroupAdminController);
 chatRouter.delete("/conversations/:conversationId/messages", auth, deleteChatForMeController);
 chatRouter.delete("/conversations/:conversationId", auth, hideConversationForUserController);
 chatRouter.get("/messages/:conversationId", auth, getMessagesController);

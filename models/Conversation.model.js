@@ -13,6 +13,9 @@ const conversationSchema = new mongoose.Schema(
     isGroup: { type: Boolean, default: false },
     groupName: { type: String, trim: true, maxlength: 100, default: "" },
     groupAvatar: { type: String, default: "" },
+    // Kept separately from admins so the creator can always be identified in
+    // the member list, even after other people are promoted.
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     admins: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     // Removing a chat only hides it for that participant; it does not erase
     // the other participant's history.
