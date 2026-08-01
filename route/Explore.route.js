@@ -1,0 +1,11 @@
+import { Router } from "express";
+import auth from "../middlewares/auth.js";
+import { addComment, bookmarkPost, createPost, deleteComment, explore, getComments, likeComment, likePost, recordView, sharePost, unbookmarkPost, unlikePost } from "../controller/Explore.controller.js";
+const router = Router();
+router.get("/explore", auth, explore);
+router.post("/posts", auth, createPost);
+router.post("/posts/:id/like", auth, likePost); router.delete("/posts/:id/like", auth, unlikePost);
+router.post("/posts/:id/comments", auth, addComment); router.get("/posts/:id/comments", auth, getComments);
+router.delete("/comments/:id", auth, deleteComment); router.post("/comments/:id/like", auth, likeComment);
+router.post("/posts/:id/share", auth, sharePost); router.post("/posts/:id/bookmark", auth, bookmarkPost); router.delete("/posts/:id/bookmark", auth, unbookmarkPost); router.post("/posts/:id/view", auth, recordView);
+export default router;
