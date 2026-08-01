@@ -255,6 +255,20 @@ export async function userDetailsController(req, res) {
   }
 }
 
+export async function myConnectionsController(req, res) {
+  try {
+    const user = await UserModel.findById(req.userId)
+      .populate("followers", "name username avatar bio")
+      .populate("following", "name username avatar bio")
+      .select("followers following")
+      .lean();
+    if (!user) return res.status(404).json({ message: "User not found", success: false, error: true });
+    return res.json({ data: { followers: user.followers || [], following: user.following || [] }, success: true, error: false });
+  } catch (error) {
+    return res.status(500).json({ message: error.message, success: false, error: true });
+  }
+}
+
 export async function updateUserController(req, res) {
   try {
     const { name, bio, avatar, mobile } = req.body;
