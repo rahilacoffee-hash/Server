@@ -269,6 +269,25 @@ export async function myConnectionsController(req, res) {
   }
 }
 
+export async function followUserController(req, res) {
+  try {
+    if (String(req.userId) === String(req.params.userId)) return res.status(400).json({ message: "You cannot follow yourself", success: false });
+    const [user, target] = await Promise.all([UserModel.findById(req.userId), UserModel.findById(req.params.userId)]);
+    if (!user || !target) return res.status(404).json({ message: "User not found", success: false });
+    if (!user.following.some((id) => String(id) === String(target._id))) { user.following.push(target._id); target.followers.push(user._id); await Promise.all([user.save(), target.save()]); }
+    return res.json({ success: true, data: { following: true } });
+  } catch (error) { return res.status(500).json({ message: error.message, success: false }); }
+}
+
+export async function unfollowUserController(req, res) {
+  try {
+    const [user, target] = await Promise.all([UserModel.findById(req.userId), UserModel.findById(req.params.userId)]);
+    if (!user || !target) return res.status(404).json({ message: "User not found", success: false });
+    user.following = user.following.filter((id) => String(id) !== String(target._id)); target.followers = target.followers.filter((id) => String(id) !== String(user._id)); await Promise.all([user.save(), target.save()]);
+    return res.json({ success: true, data: { following: false } });
+  } catch (error) { return res.status(500).json({ message: error.message, success: false }); }
+}
+
 export async function updateUserController(req, res) {
   try {
     const { name, bio, avatar, mobile } = req.body;
