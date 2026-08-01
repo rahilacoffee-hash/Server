@@ -1,6 +1,7 @@
 import UserModel from "../models/user.model.js";
 import StatusModel from "../models/Status.model.js";
 import ConversationModel from "../models/Conversation.model.js";
+import Post from "../models/Post.model.js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import sendEmail from "../config/sendEmail.js";
@@ -225,7 +226,7 @@ export async function userDetailsController(req, res) {
       UserModel.findById(req.userId)
       .select("-password -refresh_token -otp")
       .lean(),
-      StatusModel.countDocuments({ author: req.userId, expiresAt: { $gt: new Date() } }),
+      Post.countDocuments({ user: req.userId }),
       ConversationModel.find({ participants: req.userId }).select("unreadCounts").lean(),
     ]);
 

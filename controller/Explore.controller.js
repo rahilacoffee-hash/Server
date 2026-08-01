@@ -18,6 +18,19 @@ export async function createPost(req, res) {
     res.status(201).json({ success: true, data: await postData(post) });
   } catch (error) { res.status(500).json({ success: false, message: error.message }); }
 }
+export async function getMyPosts(req, res) {
+  try {
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 30));
+    const posts = await Post.find({ user: req.userId })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .populate("user", "name username avatar")
+      .lean();
+    res.json({ success: true, data: { posts } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
 export async function likePost(req, res) {
   try {
     if (!validId(req.params.id)) return res.status(400).json({ success: false, message: "Invalid post id" });

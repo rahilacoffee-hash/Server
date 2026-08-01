@@ -10,7 +10,7 @@ const uploadRouter = Router();
 const storage = multer.memoryStorage();
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB cap, adjust as needed
+  limits: { fileSize: 100 * 1024 * 1024 },
 });
 
 cloudinary.config({
@@ -35,6 +35,10 @@ uploadRouter.post("/", auth, upload.single("file"), async (req, res) => {
     const base64 = `data:${req.file.mimetype};base64,${req.file.buffer.toString(
       "base64"
     )}`;
+
+    if (!req.file.mimetype.startsWith("image/") && !req.file.mimetype.startsWith("video/") && !req.file.mimetype.startsWith("audio/")) {
+      return res.status(400).json({ message: "Only image, video, or audio files can be uploaded", success: false, error: true });
+    }
 
     const isAudio = req.file.mimetype.startsWith("audio");
 
