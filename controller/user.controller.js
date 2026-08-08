@@ -394,7 +394,7 @@ export async function searchUserController(req, res) {
 
 export async function getPublicUserController(req, res) {
   try {
-    const user = await UserModel.findById(req.params.userId).select("name username avatar bio mobile isOnline lastSeen");
+    const user = await UserModel.findById(req.params.userId).select("name username avatar bio mobile isOnline lastSeen isVerified");
     if (!user) return res.status(404).json({ message: "User not found", success: false, error: true });
     return res.json({ data: user, success: true, error: false });
   } catch (error) {
