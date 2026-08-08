@@ -8,6 +8,7 @@ import sendEmail from "../config/sendEmail.js";
 import verifyEmailTemplate from "../utils/verifyEmailTemplate.js";
 import generatedAccessToken from "../utils/generatedAccessToken.js";
 import generatedRefreshToken from "../utils/generatedRefreshToken.js";
+import crypto from "crypto";
 
 // Browsers reject SameSite=Lax cookies on XHR requests from the separately
 // hosted frontend. HTTPS deployments must use Secure + SameSite=None; local
@@ -106,6 +107,30 @@ export async function registerUserController(req, res) {
   }
 }
 
+// ADMIN_SECRET_CODE lives exclusively in the server environment. It is never
+// sent to, stored in, or compared by the browser.
+export async function registerAdminController(req, res) {
+  try {
+    const { name, email, password, secretCode } = req.body;
+    const configuredSecret = process.env.ADMIN_SECRET_CODE;
+    if (!configuredSecret || typeof secretCode !== "string") return res.status(403).json({ success: false, error: true, message: "Admin registration is unavailable" });
+    const supplied = Buffer.from(secretCode);
+    const expected = Buffer.from(configuredSecret);
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return res.status(403).json({ success: false, error: true, message: "Invalid admin secret code" });
+    if (!name || !email || !password) return res.status(400).json({ success: false, error: true, message: "Provide all required fields" });
+    if (password.length < 6) return res.status(400).json({ success: false, error: true, message: "Password must be at least 6 characters" });
+    const normalizedEmail = email.toLowerCase().trim();
+    if (await UserModel.exists({ email: normalizedEmail })) return res.status(409).json({ success: false, error: true, message: "User already exists" });
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const user = await UserModel.create({ name: name.trim(), email: normalizedEmail, password: await bcrypt.hash(password, 10), role: "ADMIN", otp: otpCode, otpExpiry: new Date(Date.now() + 10 * 60 * 1000) });
+    const emailResult = await sendEmail({ sendTo: normalizedEmail, subject: "Verify your admin email", text: `Your OTP code is ${otpCode}. It expires in 10 minutes.`, html: verifyEmailTemplate(name, otpCode) });
+    if (!emailResult.success) return res.status(500).json({ success: false, error: true, message: "Admin account created but verification email could not be sent" });
+    return res.status(201).json({ success: true, error: false, message: "Admin account created. Check your email for OTP.", data: { id: user.id } });
+  } catch (error) {
+    return res.status(500).json({ success: false, error: true, message: error.message || "Internal Server Error" });
+  }
+}
+
 // verify email
 export async function verifyEmailController(req, res) {
   try {
@@ -151,6 +176,14 @@ export async function loginUserController(req, res) {
       });
     }
 
+    if (user.status === "Suspended") {
+      return res.status(403).json({
+        message: "This account has been suspended",
+        error: true,
+        success: false,
+      });
+    }
+
     const isMatch = await bcrypt.compare(password, user.password);
 
     if (!isMatch) {
@@ -187,6 +220,8 @@ export async function loginUserController(req, res) {
           _id: user._id,
           name: user.name,
           email: user.email,
+          role: user.role,
+          isVerified: user.isVerified,
         },
       },
       success: true,

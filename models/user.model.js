@@ -103,6 +103,11 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ["ADMIN", "USER"],
       default: "USER"
+    },
+
+    isVerified: {
+      type: Boolean,
+      default: false
     }
   },
   {
