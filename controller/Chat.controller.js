@@ -138,7 +138,7 @@ export async function getOrCreateConversationController(req, res) {
 
 export async function createGroupConversationController(req, res) {
   try {
-    const { name, participantIds = [] } = req.body;
+    const { name, participantIds = [], groupAvatar = "" } = req.body;
     const participantSet = [...new Set([req.userId.toString(), ...participantIds.map(String)])];
 
     if (!name?.trim() || participantSet.length < 3) {
@@ -149,6 +149,7 @@ export async function createGroupConversationController(req, res) {
       participants: participantSet,
       isGroup: true,
       groupName: name.trim(),
+      groupAvatar: typeof groupAvatar === "string" ? groupAvatar : "",
       createdBy: req.userId,
       admins: [req.userId],
     });
