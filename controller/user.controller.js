@@ -26,7 +26,10 @@ const authCookieOptions = () => {
   };
 };
 
-const normalizeEmail = (value) => String(value ?? "").trim().toLowerCase();
+const normalizeEmail = (value) =>
+  String(value ?? "")
+    .trim()
+    .toLowerCase();
 
 // Register
 export async function registerUserController(req, res) {
@@ -115,21 +118,88 @@ export async function registerAdminController(req, res) {
   try {
     const { name, email, password, secretCode } = req.body;
     const configuredSecret = process.env.ADMIN_SECRET_CODE;
-    if (!configuredSecret || typeof secretCode !== "string") return res.status(403).json({ success: false, error: true, message: "Admin registration is unavailable" });
+    if (!configuredSecret || typeof secretCode !== "string")
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: true,
+          message: "Admin registration is unavailable",
+        });
     const supplied = Buffer.from(secretCode);
     const expected = Buffer.from(configuredSecret);
-    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) return res.status(403).json({ success: false, error: true, message: "Invalid admin secret code" });
-    if (!name || !email || !password) return res.status(400).json({ success: false, error: true, message: "Provide all required fields" });
-    if (password.length < 6) return res.status(400).json({ success: false, error: true, message: "Password must be at least 6 characters" });
+    if (
+      supplied.length !== expected.length ||
+      !crypto.timingSafeEqual(supplied, expected)
+    )
+      return res
+        .status(403)
+        .json({
+          success: false,
+          error: true,
+          message: "Invalid admin secret code",
+        });
+    if (!name || !email || !password)
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: true,
+          message: "Provide all required fields",
+        });
+    if (password.length < 6)
+      return res
+        .status(400)
+        .json({
+          success: false,
+          error: true,
+          message: "Password must be at least 6 characters",
+        });
     const normalizedEmail = email.toLowerCase().trim();
-    if (await UserModel.exists({ email: normalizedEmail })) return res.status(409).json({ success: false, error: true, message: "User already exists" });
+    if (await UserModel.exists({ email: normalizedEmail }))
+      return res
+        .status(409)
+        .json({ success: false, error: true, message: "User already exists" });
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const user = await UserModel.create({ name: name.trim(), email: normalizedEmail, password: await bcrypt.hash(password, 10), role: "ADMIN", otp: otpCode, otpExpiry: new Date(Date.now() + 10 * 60 * 1000) });
-    const emailResult = await sendEmail({ sendTo: normalizedEmail, subject: "Verify your admin email", text: `Your OTP code is ${otpCode}. It expires in 10 minutes.`, html: verifyEmailTemplate(name, otpCode) });
-    if (!emailResult.success) return res.status(500).json({ success: false, error: true, message: "Admin account created but verification email could not be sent" });
-    return res.status(201).json({ success: true, error: false, message: "Admin account created. Check your email for OTP.", data: { id: user.id } });
+    const user = await UserModel.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      password: await bcrypt.hash(password, 10),
+      role: "ADMIN",
+      otp: otpCode,
+      otpExpiry: new Date(Date.now() + 10 * 60 * 1000),
+    });
+    const emailResult = await sendEmail({
+      sendTo: normalizedEmail,
+      subject: "Verify your admin email",
+      text: `Your OTP code is ${otpCode}. It expires in 10 minutes.`,
+      html: verifyEmailTemplate(name, otpCode),
+    });
+    if (!emailResult.success)
+      return res
+        .status(500)
+        .json({
+          success: false,
+          error: true,
+          message:
+            "Admin account created but verification email could not be sent",
+        });
+    return res
+      .status(201)
+      .json({
+        success: true,
+        error: false,
+        message: "Admin account created. Check your email for OTP.",
+        data: { id: user.id },
+      });
   } catch (error) {
-    return res.status(500).json({ success: false, error: true, message: error.message || "Internal Server Error" });
+    return res
+      .status(500)
+      .json({
+        success: false,
+        error: true,
+        message: error.message || "Internal Server Error",
+      });
   }
 }
 
@@ -263,10 +333,12 @@ export async function userDetailsController(req, res) {
   try {
     const [user, postCount, conversations] = await Promise.all([
       UserModel.findById(req.userId)
-      .select("-password -refresh_token -otp")
-      .lean(),
+        .select("-password -refresh_token -otp")
+        .lean(),
       Post.countDocuments({ user: req.userId }),
-      ConversationModel.find({ participants: req.userId }).select("unreadCounts").lean(),
+      ConversationModel.find({ participants: req.userId })
+        .select("unreadCounts")
+        .lean(),
     ]);
 
     if (!user) {
@@ -278,7 +350,9 @@ export async function userDetailsController(req, res) {
     }
 
     const unreadNotifications = conversations.reduce(
-      (total, conversation) => total + Number(conversation.unreadCounts?.[req.userId] || 0), 0
+      (total, conversation) =>
+        total + Number(conversation.unreadCounts?.[req.userId] || 0),
+      0,
     );
     return res.status(200).json({
       data: { ...user, postCount, unreadNotifications },
@@ -301,30 +375,71 @@ export async function myConnectionsController(req, res) {
       .populate("following", "name username avatar bio")
       .select("followers following")
       .lean();
-    if (!user) return res.status(404).json({ message: "User not found", success: false, error: true });
-    return res.json({ data: { followers: user.followers || [], following: user.following || [] }, success: true, error: false });
+    if (!user)
+      return res
+        .status(404)
+        .json({ message: "User not found", success: false, error: true });
+    return res.json({
+      data: {
+        followers: user.followers || [],
+        following: user.following || [],
+      },
+      success: true,
+      error: false,
+    });
   } catch (error) {
-    return res.status(500).json({ message: error.message, success: false, error: true });
+    return res
+      .status(500)
+      .json({ message: error.message, success: false, error: true });
   }
 }
 
 export async function followUserController(req, res) {
   try {
-    if (String(req.userId) === String(req.params.userId)) return res.status(400).json({ message: "You cannot follow yourself", success: false });
-    const [user, target] = await Promise.all([UserModel.findById(req.userId), UserModel.findById(req.params.userId)]);
-    if (!user || !target) return res.status(404).json({ message: "User not found", success: false });
-    if (!user.following.some((id) => String(id) === String(target._id))) { user.following.push(target._id); target.followers.push(user._id); await Promise.all([user.save(), target.save()]); }
+    if (String(req.userId) === String(req.params.userId))
+      return res
+        .status(400)
+        .json({ message: "You cannot follow yourself", success: false });
+    const [user, target] = await Promise.all([
+      UserModel.findById(req.userId),
+      UserModel.findById(req.params.userId),
+    ]);
+    if (!user || !target)
+      return res
+        .status(404)
+        .json({ message: "User not found", success: false });
+    if (!user.following.some((id) => String(id) === String(target._id))) {
+      user.following.push(target._id);
+      target.followers.push(user._id);
+      await Promise.all([user.save(), target.save()]);
+    }
     return res.json({ success: true, data: { following: true } });
-  } catch (error) { return res.status(500).json({ message: error.message, success: false }); }
+  } catch (error) {
+    return res.status(500).json({ message: error.message, success: false });
+  }
 }
 
 export async function unfollowUserController(req, res) {
   try {
-    const [user, target] = await Promise.all([UserModel.findById(req.userId), UserModel.findById(req.params.userId)]);
-    if (!user || !target) return res.status(404).json({ message: "User not found", success: false });
-    user.following = user.following.filter((id) => String(id) !== String(target._id)); target.followers = target.followers.filter((id) => String(id) !== String(user._id)); await Promise.all([user.save(), target.save()]);
+    const [user, target] = await Promise.all([
+      UserModel.findById(req.userId),
+      UserModel.findById(req.params.userId),
+    ]);
+    if (!user || !target)
+      return res
+        .status(404)
+        .json({ message: "User not found", success: false });
+    user.following = user.following.filter(
+      (id) => String(id) !== String(target._id),
+    );
+    target.followers = target.followers.filter(
+      (id) => String(id) !== String(user._id),
+    );
+    await Promise.all([user.save(), target.save()]);
     return res.json({ success: true, data: { following: false } });
-  } catch (error) { return res.status(500).json({ message: error.message, success: false }); }
+  } catch (error) {
+    return res.status(500).json({ message: error.message, success: false });
+  }
 }
 
 export async function updateUserController(req, res) {
@@ -398,11 +513,18 @@ export async function searchUserController(req, res) {
 
 export async function getPublicUserController(req, res) {
   try {
-    const user = await UserModel.findById(req.params.userId).select("name username avatar bio mobile isOnline lastSeen isVerified");
-    if (!user) return res.status(404).json({ message: "User not found", success: false, error: true });
+    const user = await UserModel.findById(req.params.userId).select(
+      "name username avatar bio mobile isOnline lastSeen isVerified",
+    );
+    if (!user)
+      return res
+        .status(404)
+        .json({ message: "User not found", success: false, error: true });
     return res.json({ data: user, success: true, error: false });
   } catch (error) {
-    return res.status(400).json({ message: "Invalid user", success: false, error: true });
+    return res
+      .status(400)
+      .json({ message: "Invalid user", success: false, error: true });
   }
 }
 
@@ -514,7 +636,9 @@ export async function refreshToken(req, res) {
     const verifyToken = jwt.verify(token, process.env.SECRET_KEY_REFRESH_TOKEN);
 
     // Reject a refresh token that was superseded by a later login or logout.
-    const user = await UserModel.findById(verifyToken.id).select("refresh_token");
+    const user = await UserModel.findById(verifyToken.id).select(
+      "refresh_token",
+    );
     if (!user || user.refresh_token !== token) {
       return res.status(401).json({
         message: "Refresh token is no longer valid",
@@ -533,7 +657,10 @@ export async function refreshToken(req, res) {
       error: false,
     });
   } catch (error) {
-    if (error.name === "TokenExpiredError" || error.name === "JsonWebTokenError") {
+    if (
+      error.name === "TokenExpiredError" ||
+      error.name === "JsonWebTokenError"
+    ) {
       return res.status(401).json({
         message: "Invalid or expired refresh token",
         error: true,
