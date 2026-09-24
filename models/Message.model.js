@@ -26,6 +26,15 @@ const messageSchema = new mongoose.Schema(
       type: String,
       default: "",
     },
+    poll: {
+      question: { type: String, default: "" },
+      options: [
+        {
+          text: { type: String, required: true },
+          votes: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+        },
+      ],
+    },
     mediaUrl: {
       type: String,
       default: "",
@@ -76,10 +85,12 @@ const messageSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
-    editHistory: [{
-      text: { type: String, required: true },
-      editedAt: { type: Date, required: true },
-    }],
+    editHistory: [
+      {
+        text: { type: String, required: true },
+        editedAt: { type: Date, required: true },
+      },
+    ],
     starredBy: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     isDeleted: {
       type: Boolean,
@@ -103,7 +114,7 @@ const messageSchema = new mongoose.Schema(
       },
     ],
   },
-  { timestamps: true } // gives us createdAt as the "sent" timestamp for free
+  { timestamps: true }, // gives us createdAt as the "sent" timestamp for free
 );
 
 messageSchema.index({ conversationId: 1, createdAt: 1 });

@@ -67,7 +67,11 @@ function initSocket(httpServer) {
       if (error.name === "TokenExpiredError") {
         console.warn("🔒 Socket auth: token expired for a connecting client");
       } else {
-        console.error("🔒 Socket auth: verify failed —", error.name, error.message);
+        console.error(
+          "🔒 Socket auth: verify failed —",
+          error.name,
+          error.message,
+        );
       }
       next(new Error("Invalid or expired token"));
     }
@@ -110,6 +114,7 @@ function initSocket(httpServer) {
           type = "text",
           text = "",
           mediaUrl = "",
+          poll = null,
           viewOnce = false,
           fileName = "",
           fileSize = 0,
@@ -129,7 +134,10 @@ function initSocket(httpServer) {
         });
 
         if (!conversation) {
-          return callback?.({ success: false, message: "Conversation not found" });
+          return callback?.({
+            success: false,
+            message: "Conversation not found",
+          });
         }
 
         const recipientIds = conversation.participants
@@ -144,7 +152,21 @@ function initSocket(httpServer) {
           type,
           text,
           mediaUrl,
-          viewOnce: Boolean(viewOnce) && ["image", "video", "audio"].includes(type),
+          poll:
+            poll?.question && Array.isArray(poll.options)
+              ? {
+                  question: String(poll.question).trim(),
+                  options: poll.options
+                    .map((option) => ({
+                      text: String(option.text).trim(),
+                      votes: [],
+                    }))
+                    .filter((option) => option.text)
+                    .slice(0, 10),
+                }
+              : undefined,
+          viewOnce:
+            Boolean(viewOnce) && ["image", "video", "audio"].includes(type),
           fileName,
           fileSize,
           replyTo,
@@ -171,7 +193,9 @@ function initSocket(httpServer) {
 
         await conversation.save();
 
-        const receiverSockets = recipientIds.flatMap((recipientId) => getSocketsForUser(recipientId));
+        const receiverSockets = recipientIds.flatMap((recipientId) =>
+          getSocketsForUser(recipientId),
+        );
 
         if (receiverSockets.length > 0) {
           message.deliveredAt = new Date();
@@ -206,31 +230,72 @@ function initSocket(httpServer) {
       }
     });
 
+    socket.on("votePoll", async ({ messageId, optionIndex }, callback) => {
+      try {
+        const message = await MessageModel.findOne({
+          _id: messageId,
+          type: "text",
+        });
+        if (!message?.poll?.options?.[optionIndex]) {
+          callback?.({ success: false, message: "Poll not found" });
+          return;
+        }
+
+        message.poll.options.forEach((option) => {
+          option.votes = option.votes.filter(
+            (voterId) => voterId.toString() !== userId.toString(),
+          );
+        });
+        message.poll.options[optionIndex].votes.push(userId);
+        await message.save();
+
+        const conversation = await ConversationModel.findById(
+          message.conversationId,
+        );
+        const participantIds = conversation?.participants || [];
+        const populated = await MessageModel.findById(message._id)
+          .populate("sender", "name email avatar isOnline lastSeen")
+          .populate("receiver", "name email avatar isOnline lastSeen");
+        participantIds.forEach((participantId) => {
+          getSocketsForUser(participantId.toString()).forEach((socketId) =>
+            io.to(socketId).emit("pollUpdated", populated),
+          );
+        });
+        callback?.({ success: true, message: populated });
+      } catch (error) {
+        console.error(error);
+        callback?.({ success: false, message: "Could not vote on poll" });
+      }
+    });
+
     // ==========================
     // CALLING (WEBRTC SIGNALING)
     // ==========================
 
-    socket.on("callUser", ({ receiverId, offer, callerName, callType = "voice" }, callback) => {
-      const receiverSockets = getSocketsForUser(receiverId);
+    socket.on(
+      "callUser",
+      ({ receiverId, offer, callerName, callType = "voice" }, callback) => {
+        const receiverSockets = getSocketsForUser(receiverId);
 
-      if (!receiverSockets.length) {
-        callback?.({ success: false, message: "User is not online" });
-        return;
-      }
+        if (!receiverSockets.length) {
+          callback?.({ success: false, message: "User is not online" });
+          return;
+        }
 
-      receiverSockets.forEach((socketId) => {
-        io.to(socketId).emit("incomingCall", {
-          callerId: userId,
-          callerName,
-          callType,
-          offer,
+        receiverSockets.forEach((socketId) => {
+          io.to(socketId).emit("incomingCall", {
+            callerId: userId,
+            callerName,
+            callType,
+            offer,
+          });
         });
-      });
 
-      socket.data.callTarget = receiverId;
+        socket.data.callTarget = receiverId;
 
-      callback?.({ success: true });
-    });
+        callback?.({ success: true });
+      },
+    );
 
     socket.on("answerCall", ({ callerId, answer }) => {
       const callerSockets = getSocketsForUser(callerId);
@@ -275,57 +340,137 @@ function initSocket(httpServer) {
 
     // Group calls use a WebRTC mesh: the server only authorizes and forwards
     // signaling, while every participant makes a peer connection to the others.
-    socket.on("startGroupCall", async ({ conversationId, callType = "voice" }, callback) => {
-      try {
-        const conversation = await ConversationModel.findOne({ _id: conversationId, isGroup: true, participants: userId }).populate("participants", "name");
-        if (!conversation) return callback?.({ success: false, message: "Group not found." });
-        const caller = await UserModel.findById(userId).select("name");
+    socket.on(
+      "startGroupCall",
+      async ({ conversationId, callType = "voice" }, callback) => {
+        try {
+          const conversation = await ConversationModel.findOne({
+            _id: conversationId,
+            isGroup: true,
+            participants: userId,
+          }).populate("participants", "name");
+          if (!conversation)
+            return callback?.({ success: false, message: "Group not found." });
+          const caller = await UserModel.findById(userId).select("name");
 
-        const sessionId = `${conversationId}:${Date.now()}:${socket.id}`;
-        const members = conversation.participants.map((member) => ({ id: member._id.toString(), name: member.name }));
-        groupCalls.set(sessionId, { conversationId, callType, groupName: conversation.groupName || "Group call", members: new Set(members.map((member) => member.id)), joined: new Set([userId]) });
-        members.filter((member) => member.id !== userId).forEach((member) => getSocketsForUser(member.id).forEach((socketId) => io.to(socketId).emit("incomingGroupCall", { sessionId, conversationId, callerId: userId, callerName: caller?.name || "Someone", callType, groupName: conversation.groupName || "Group call" })));
-        callback?.({ success: true, sessionId, members });
-      } catch (error) {
-        console.error("Could not start group call", error);
-        callback?.({ success: false, message: "Could not start group call." });
-      }
-    });
+          const sessionId = `${conversationId}:${Date.now()}:${socket.id}`;
+          const members = conversation.participants.map((member) => ({
+            id: member._id.toString(),
+            name: member.name,
+          }));
+          groupCalls.set(sessionId, {
+            conversationId,
+            callType,
+            groupName: conversation.groupName || "Group call",
+            members: new Set(members.map((member) => member.id)),
+            joined: new Set([userId]),
+          });
+          members
+            .filter((member) => member.id !== userId)
+            .forEach((member) =>
+              getSocketsForUser(member.id).forEach((socketId) =>
+                io
+                  .to(socketId)
+                  .emit("incomingGroupCall", {
+                    sessionId,
+                    conversationId,
+                    callerId: userId,
+                    callerName: caller?.name || "Someone",
+                    callType,
+                    groupName: conversation.groupName || "Group call",
+                  }),
+              ),
+            );
+          callback?.({ success: true, sessionId, members });
+        } catch (error) {
+          console.error("Could not start group call", error);
+          callback?.({
+            success: false,
+            message: "Could not start group call.",
+          });
+        }
+      },
+    );
 
     socket.on("joinGroupCall", ({ sessionId }, callback) => {
       const groupCall = groupCalls.get(sessionId);
-      if (!groupCall || !groupCall.members.has(userId)) return callback?.({ success: false, message: "This group call is no longer available." });
+      if (!groupCall || !groupCall.members.has(userId))
+        return callback?.({
+          success: false,
+          message: "This group call is no longer available.",
+        });
       const participants = [...groupCall.joined];
       groupCall.joined.add(userId);
-      participants.forEach((participantId) => getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit("groupCallParticipantJoined", { sessionId, userId })));
+      participants.forEach((participantId) =>
+        getSocketsForUser(participantId).forEach((socketId) =>
+          io
+            .to(socketId)
+            .emit("groupCallParticipantJoined", { sessionId, userId }),
+        ),
+      );
       callback?.({ success: true, participants });
     });
 
     socket.on("getActiveGroupCall", ({ conversationId }, callback) => {
-      const entry = [...groupCalls.entries()].find(([, groupCall]) => groupCall.conversationId === conversationId && groupCall.members.has(userId) && groupCall.joined.size > 0);
+      const entry = [...groupCalls.entries()].find(
+        ([, groupCall]) =>
+          groupCall.conversationId === conversationId &&
+          groupCall.members.has(userId) &&
+          groupCall.joined.size > 0,
+      );
       if (!entry) return callback?.({ success: true, call: null });
       const [sessionId, groupCall] = entry;
-      callback?.({ success: true, call: { sessionId, conversationId, callType: groupCall.callType, groupName: groupCall.groupName, participants: [...groupCall.joined] } });
+      callback?.({
+        success: true,
+        call: {
+          sessionId,
+          conversationId,
+          callType: groupCall.callType,
+          groupName: groupCall.groupName,
+          participants: [...groupCall.joined],
+        },
+      });
     });
 
-    socket.on("groupCallSignal", ({ sessionId, targetUserId, signal }, callback) => {
-      const groupCall = groupCalls.get(sessionId);
-      if (!groupCall?.joined.has(userId) || !groupCall.joined.has(targetUserId)) return callback?.({ success: false });
-      getSocketsForUser(targetUserId).forEach((socketId) => io.to(socketId).emit("groupCallSignal", { sessionId, fromUserId: userId, signal }));
-      callback?.({ success: true });
-    });
+    socket.on(
+      "groupCallSignal",
+      ({ sessionId, targetUserId, signal }, callback) => {
+        const groupCall = groupCalls.get(sessionId);
+        if (
+          !groupCall?.joined.has(userId) ||
+          !groupCall.joined.has(targetUserId)
+        )
+          return callback?.({ success: false });
+        getSocketsForUser(targetUserId).forEach((socketId) =>
+          io
+            .to(socketId)
+            .emit("groupCallSignal", { sessionId, fromUserId: userId, signal }),
+        );
+        callback?.({ success: true });
+      },
+    );
 
     socket.on("endGroupCall", ({ sessionId }) => {
       const groupCall = groupCalls.get(sessionId);
       if (!groupCall?.joined.has(userId)) return;
-      [...groupCall.joined].forEach((participantId) => getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit("groupCallEnded", { sessionId })));
+      [...groupCall.joined].forEach((participantId) =>
+        getSocketsForUser(participantId).forEach((socketId) =>
+          io.to(socketId).emit("groupCallEnded", { sessionId }),
+        ),
+      );
       groupCalls.delete(sessionId);
     });
 
     socket.on("leaveGroupCall", ({ sessionId }) => {
       const groupCall = groupCalls.get(sessionId);
       if (!groupCall?.joined.delete(userId)) return;
-      [...groupCall.joined].forEach((participantId) => getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit("groupCallParticipantLeft", { sessionId, userId })));
+      [...groupCall.joined].forEach((participantId) =>
+        getSocketsForUser(participantId).forEach((socketId) =>
+          io
+            .to(socketId)
+            .emit("groupCallParticipantLeft", { sessionId, userId }),
+        ),
+      );
       if (!groupCall.joined.size) groupCalls.delete(sessionId);
     });
 
@@ -344,11 +489,19 @@ function initSocket(httpServer) {
 
           await message.save();
 
-          const conversation = await ConversationModel.findById(message.conversationId);
+          const conversation = await ConversationModel.findById(
+            message.conversationId,
+          );
 
           if (conversation) {
             conversation.unreadCounts.set(userId, 0);
 
+            if (poll && !conversation.isGroup) {
+              return callback?.({
+                success: false,
+                message: "Polls are only available in group chats",
+              });
+            }
             await conversation.save();
           }
 
@@ -426,7 +579,9 @@ function initSocket(httpServer) {
 
       if (!userSocketMap[userId]) return;
 
-      userSocketMap[userId] = userSocketMap[userId].filter((id) => id !== socket.id);
+      userSocketMap[userId] = userSocketMap[userId].filter(
+        (id) => id !== socket.id,
+      );
 
       if (userSocketMap[userId].length === 0) {
         delete userSocketMap[userId];
@@ -455,7 +610,9 @@ function initSocket(httpServer) {
 
         // A user has at most one reaction. Sending a null reaction (or selecting
         // the same emoji again) removes it, matching WhatsApp's toggle behavior.
-        message.reactions = message.reactions.filter((r) => r.userId.toString() !== userId);
+        message.reactions = message.reactions.filter(
+          (r) => r.userId.toString() !== userId,
+        );
 
         if (reaction) {
           message.reactions.push({
@@ -472,7 +629,9 @@ function initSocket(httpServer) {
 
         // Broadcast from the stored message participants, not a client-provided
         // receiver id. This keeps reaction updates in sync on every open device.
-        const participantIds = [message.sender, message.receiver].map((id) => id.toString());
+        const participantIds = [message.sender, message.receiver].map((id) =>
+          id.toString(),
+        );
         [...new Set(participantIds)].forEach((participantId) => {
           getSocketsForUser(participantId).forEach((socketId) => {
             io.to(socketId).emit("messageReactionUpdated", populated);
@@ -497,21 +656,35 @@ function initSocket(httpServer) {
         });
 
     const emitToMessageParticipants = (message, event, payload) => {
-      const participantIds = [message.sender._id || message.sender, message.receiver._id || message.receiver].map(
-        (id) => id.toString()
-      );
+      const participantIds = [
+        message.sender._id || message.sender,
+        message.receiver._id || message.receiver,
+      ].map((id) => id.toString());
       [...new Set(participantIds)].forEach((participantId) => {
-        getSocketsForUser(participantId).forEach((socketId) => io.to(socketId).emit(event, payload));
+        getSocketsForUser(participantId).forEach((socketId) =>
+          io.to(socketId).emit(event, payload),
+        );
       });
     };
 
     socket.on("editMessage", async ({ messageId, text }, callback) => {
       try {
         const message = await MessageModel.findById(messageId);
-        if (!message || message.sender.toString() !== userId || message.isDeleted) {
-          return callback?.({ success: false, message: "Message cannot be edited" });
+        if (
+          !message ||
+          message.sender.toString() !== userId ||
+          message.isDeleted
+        ) {
+          return callback?.({
+            success: false,
+            message: "Message cannot be edited",
+          });
         }
-        if (!text?.trim()) return callback?.({ success: false, message: "Message cannot be empty" });
+        if (!text?.trim())
+          return callback?.({
+            success: false,
+            message: "Message cannot be empty",
+          });
 
         message.editHistory.push({ text: message.text, editedAt: new Date() });
         message.text = text.trim();
@@ -528,26 +701,45 @@ function initSocket(httpServer) {
     socket.on("toggleStarMessage", async ({ messageId }, callback) => {
       try {
         const message = await MessageModel.findById(messageId);
-        const participant = message && [message.sender.toString(), message.receiver.toString()].includes(userId);
-        if (!participant) return callback?.({ success: false, message: "Message not found" });
-        const alreadyStarred = message.starredBy.some((id) => id.toString() === userId);
-        message.starredBy = alreadyStarred ? message.starredBy.filter((id) => id.toString() !== userId) : [...message.starredBy, userId];
+        const participant =
+          message &&
+          [message.sender.toString(), message.receiver.toString()].includes(
+            userId,
+          );
+        if (!participant)
+          return callback?.({ success: false, message: "Message not found" });
+        const alreadyStarred = message.starredBy.some(
+          (id) => id.toString() === userId,
+        );
+        message.starredBy = alreadyStarred
+          ? message.starredBy.filter((id) => id.toString() !== userId)
+          : [...message.starredBy, userId];
         await message.save();
         const populated = await populateMessage(message._id);
         emitToMessageParticipants(populated, "messageUpdated", populated);
         callback?.({ success: true, message: populated });
-      } catch { callback?.({ success: false, message: "Could not save message" }); }
+      } catch {
+        callback?.({ success: false, message: "Could not save message" });
+      }
     });
 
     socket.on("deleteMessage", async ({ messageId, scope }, callback) => {
       try {
         const message = await MessageModel.findById(messageId);
-        const isParticipant = message && [message.sender.toString(), message.receiver.toString()].includes(userId);
-        if (!isParticipant) return callback?.({ success: false, message: "Message not found" });
+        const isParticipant =
+          message &&
+          [message.sender.toString(), message.receiver.toString()].includes(
+            userId,
+          );
+        if (!isParticipant)
+          return callback?.({ success: false, message: "Message not found" });
 
         if (scope === "everyone") {
           if (message.sender.toString() !== userId) {
-            return callback?.({ success: false, message: "Only the sender can delete for everyone" });
+            return callback?.({
+              success: false,
+              message: "Only the sender can delete for everyone",
+            });
           }
           message.isDeleted = true;
           message.text = "";
@@ -573,8 +765,15 @@ function initSocket(httpServer) {
     socket.on("viewOnceMessage", async ({ messageId }, callback) => {
       try {
         const message = await MessageModel.findById(messageId);
-        if (!message || !message.viewOnce || message.receiver.toString() !== userId) {
-          return callback?.({ success: false, message: "This media is unavailable" });
+        if (
+          !message ||
+          !message.viewOnce ||
+          message.receiver.toString() !== userId
+        ) {
+          return callback?.({
+            success: false,
+            message: "This media is unavailable",
+          });
         }
         message.viewedAt = new Date();
         message.mediaUrl = "";
