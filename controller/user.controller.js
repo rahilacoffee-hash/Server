@@ -26,6 +26,8 @@ const authCookieOptions = () => {
   };
 };
 
+const normalizeEmail = (value) => String(value ?? "").trim().toLowerCase();
+
 // Register
 export async function registerUserController(req, res) {
   try {
@@ -135,7 +137,8 @@ export async function registerAdminController(req, res) {
 export async function verifyEmailController(req, res) {
   try {
     const { email, otp } = req.body;
-    const user = await UserModel.findOne({ email });
+    const normalizedEmail = normalizeEmail(email);
+    const user = await UserModel.findOne({ email: normalizedEmail });
     if (!user)
       return res
         .status(400)
@@ -165,8 +168,9 @@ export async function verifyEmailController(req, res) {
 export async function loginUserController(req, res) {
   try {
     const { email, password } = req.body;
+    const normalizedEmail = normalizeEmail(email);
 
-    const user = await UserModel.findOne({ email });
+    const user = await UserModel.findOne({ email: normalizedEmail });
 
     if (!user) {
       return res.status(400).json({
@@ -405,7 +409,8 @@ export async function getPublicUserController(req, res) {
 export async function forgotPasswordController(req, res) {
   try {
     const { email } = req.body;
-    const user = await UserModel.findOne({ email });
+    const normalizedEmail = normalizeEmail(email);
+    const user = await UserModel.findOne({ email: normalizedEmail });
     if (!user)
       return res
         .status(404)
@@ -416,7 +421,7 @@ export async function forgotPasswordController(req, res) {
       otpExpiry: Date.now() + 600000,
     });
     await sendEmail({
-      sendTo: email,
+      sendTo: normalizedEmail,
       subject: "Reset your chatverse password",
       text: `Your OTP is ${otp}`,
       html: verifyEmailTemplate(user.name, otp),
@@ -434,7 +439,8 @@ export async function forgotPasswordController(req, res) {
 export async function verifyforgotPasswordOtp(req, res) {
   try {
     const { email, otp } = req.body;
-    const user = await UserModel.findOne({ email });
+    const normalizedEmail = normalizeEmail(email);
+    const user = await UserModel.findOne({ email: normalizedEmail });
     if (!user)
       return res
         .status(404)
@@ -463,12 +469,13 @@ export async function verifyforgotPasswordOtp(req, res) {
 export async function resetPassword(req, res) {
   try {
     const { email, newPassword, confirmPassword } = req.body;
-    if (!email || !newPassword || !confirmPassword) {
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail || !newPassword || !confirmPassword) {
       return res
         .status(400)
         .json({ message: "Provide all fields", error: true, success: false });
     }
-    const user = await UserModel.findOne({ email });
+    const user = await UserModel.findOne({ email: normalizedEmail });
     if (!user)
       return res
         .status(400)
