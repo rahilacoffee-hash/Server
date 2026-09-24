@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   loginUserController,
+  googleLoginController,
   registerUserController,
   registerAdminController,
   searchUserController,
@@ -8,7 +9,17 @@ import {
   updateUserController,
   verifyEmailController,
 } from "../controller/user.controller.js";
-import { logoutController, userDetailsController, myConnectionsController, followUserController, unfollowUserController, forgotPasswordController, verifyforgotPasswordOtp, resetPassword, refreshToken } from "../controller/user.controller.js";
+import {
+  logoutController,
+  userDetailsController,
+  myConnectionsController,
+  followUserController,
+  unfollowUserController,
+  forgotPasswordController,
+  verifyforgotPasswordOtp,
+  resetPassword,
+  refreshToken,
+} from "../controller/user.controller.js";
 import auth from "../middlewares/auth.js";
 
 const userRouter = Router();
@@ -17,6 +28,7 @@ userRouter.post("/register", registerUserController);
 userRouter.post("/register-admin", registerAdminController);
 userRouter.post("/verifyEmail", verifyEmailController);
 userRouter.post("/login", loginUserController);
+userRouter.post("/google", googleLoginController);
 userRouter.get("/logout", auth, logoutController);
 userRouter.get("/user-details", auth, userDetailsController);
 userRouter.get("/connections", auth, myConnectionsController);

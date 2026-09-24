@@ -9,6 +9,9 @@ import verifyEmailTemplate from "../utils/verifyEmailTemplate.js";
 import generatedAccessToken from "../utils/generatedAccessToken.js";
 import generatedRefreshToken from "../utils/generatedRefreshToken.js";
 import crypto from "crypto";
+import { OAuth2Client } from "google-auth-library";
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // Browsers reject SameSite=Lax cookies on XHR requests from the separately
 // hosted frontend. HTTPS deployments must use Secure + SameSite=None; local
@@ -119,42 +122,34 @@ export async function registerAdminController(req, res) {
     const { name, email, password, secretCode } = req.body;
     const configuredSecret = process.env.ADMIN_SECRET_CODE;
     if (!configuredSecret || typeof secretCode !== "string")
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: true,
-          message: "Admin registration is unavailable",
-        });
+      return res.status(403).json({
+        success: false,
+        error: true,
+        message: "Admin registration is unavailable",
+      });
     const supplied = Buffer.from(secretCode);
     const expected = Buffer.from(configuredSecret);
     if (
       supplied.length !== expected.length ||
       !crypto.timingSafeEqual(supplied, expected)
     )
-      return res
-        .status(403)
-        .json({
-          success: false,
-          error: true,
-          message: "Invalid admin secret code",
-        });
+      return res.status(403).json({
+        success: false,
+        error: true,
+        message: "Invalid admin secret code",
+      });
     if (!name || !email || !password)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: true,
-          message: "Provide all required fields",
-        });
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Provide all required fields",
+      });
     if (password.length < 6)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          error: true,
-          message: "Password must be at least 6 characters",
-        });
+      return res.status(400).json({
+        success: false,
+        error: true,
+        message: "Password must be at least 6 characters",
+      });
     const normalizedEmail = email.toLowerCase().trim();
     if (await UserModel.exists({ email: normalizedEmail }))
       return res
@@ -176,30 +171,24 @@ export async function registerAdminController(req, res) {
       html: verifyEmailTemplate(name, otpCode),
     });
     if (!emailResult.success)
-      return res
-        .status(500)
-        .json({
-          success: false,
-          error: true,
-          message:
-            "Admin account created but verification email could not be sent",
-        });
-    return res
-      .status(201)
-      .json({
-        success: true,
-        error: false,
-        message: "Admin account created. Check your email for OTP.",
-        data: { id: user.id },
-      });
-  } catch (error) {
-    return res
-      .status(500)
-      .json({
+      return res.status(500).json({
         success: false,
         error: true,
-        message: error.message || "Internal Server Error",
+        message:
+          "Admin account created but verification email could not be sent",
       });
+    return res.status(201).json({
+      success: true,
+      error: false,
+      message: "Admin account created. Check your email for OTP.",
+      data: { id: user.id },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      error: true,
+      message: error.message || "Internal Server Error",
+    });
   }
 }
 
@@ -304,6 +293,90 @@ export async function loginUserController(req, res) {
   } catch (error) {
     return res.status(500).json({
       message: error.message,
+      error: true,
+      success: false,
+    });
+  }
+}
+
+export async function googleLoginController(req, res) {
+  try {
+    const { credential } = req.body;
+    if (!process.env.GOOGLE_CLIENT_ID || !credential) {
+      return res.status(400).json({
+        message: "Google sign-in is not configured",
+        error: true,
+        success: false,
+      });
+    }
+
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: process.env.GOOGLE_CLIENT_ID,
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.sub || !payload.email || payload.email_verified !== true) {
+      return res.status(401).json({
+        message: "Google account could not be verified",
+        error: true,
+        success: false,
+      });
+    }
+
+    const normalizedEmail = normalizeEmail(payload.email);
+    let user = await UserModel.findOne({ email: normalizedEmail });
+    if (user?.status === "Suspended") {
+      return res.status(403).json({
+        message: "This account has been suspended",
+        error: true,
+        success: false,
+      });
+    }
+
+    if (!user) {
+      user = await UserModel.create({
+        name: payload.name || normalizedEmail.split("@")[0],
+        email: normalizedEmail,
+        password: await bcrypt.hash(crypto.randomBytes(32).toString("hex"), 10),
+        avatar: payload.picture || "",
+        role: "USER",
+        verify_email: true,
+        isVerified: true,
+      });
+    } else if (payload.picture && !user.avatar) {
+      user.avatar = payload.picture;
+    }
+
+    const accessToken = await generatedAccessToken(user._id, user.role);
+    const refreshToken = await generatedRefreshToken(user._id, user.role);
+    user.refresh_token = refreshToken;
+    user.last_login_date = new Date();
+    await user.save();
+
+    const cookiesOption = authCookieOptions();
+    res.cookie("accessToken", accessToken, cookiesOption);
+    res.cookie("refreshToken", refreshToken, cookiesOption);
+    return res.status(200).json({
+      message: "Google sign-in successful",
+      data: {
+        accessToken,
+        refreshToken,
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          avatar: user.avatar,
+          isVerified: user.isVerified || user.verify_email,
+        },
+      },
+      success: true,
+      error: false,
+    });
+  } catch (error) {
+    console.error("Google Login Error:", error.message);
+    return res.status(401).json({
+      message: "Google sign-in failed",
       error: true,
       success: false,
     });
