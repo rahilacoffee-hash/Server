@@ -58,6 +58,11 @@ const userSchema = new mongoose.Schema(
       default: false
     },
 
+    readReceipts: {
+      type: Boolean,
+      default: true
+    },
+
     lastSeen: {
       type: Date,
       default: null

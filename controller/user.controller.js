@@ -517,16 +517,14 @@ export async function unfollowUserController(req, res) {
 
 export async function updateUserController(req, res) {
   try {
-    const { name, bio, avatar, mobile } = req.body;
+    const { name, bio, avatar, mobile, readReceipts } = req.body;
+
+    const updates = { name, bio, avatar, mobile };
+    if (typeof readReceipts === "boolean") updates.readReceipts = readReceipts;
 
     const user = await UserModel.findByIdAndUpdate(
       req.userId,
-      {
-        name,
-        bio,
-        avatar,
-        mobile,
-      },
+      updates,
       {
         returnDocument: "after",
       },

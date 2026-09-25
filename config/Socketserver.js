@@ -480,9 +480,14 @@ function initSocket(httpServer) {
 
     socket.on("markAsRead", async ({ messageId, senderId }) => {
       try {
+        const user = await UserModel.findById(userId).select("readReceipts");
+        if (user?.readReceipts === false) return;
+
         const message = await MessageModel.findById(messageId);
 
         if (!message) return;
+
+        if (message.sender.toString() !== senderId?.toString()) return;
 
         if (!message.readAt) {
           message.readAt = new Date();
@@ -495,13 +500,6 @@ function initSocket(httpServer) {
 
           if (conversation) {
             conversation.unreadCounts.set(userId, 0);
-
-            if (poll && !conversation.isGroup) {
-              return callback?.({
-                success: false,
-                message: "Polls are only available in group chats",
-              });
-            }
             await conversation.save();
           }
 
