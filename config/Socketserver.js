@@ -369,16 +369,14 @@ function initSocket(httpServer) {
             .filter((member) => member.id !== userId)
             .forEach((member) =>
               getSocketsForUser(member.id).forEach((socketId) =>
-                io
-                  .to(socketId)
-                  .emit("incomingGroupCall", {
-                    sessionId,
-                    conversationId,
-                    callerId: userId,
-                    callerName: caller?.name || "Someone",
-                    callType,
-                    groupName: conversation.groupName || "Group call",
-                  }),
+                io.to(socketId).emit("incomingGroupCall", {
+                  sessionId,
+                  conversationId,
+                  callerId: userId,
+                  callerName: caller?.name || "Someone",
+                  callType,
+                  groupName: conversation.groupName || "Group call",
+                }),
               ),
             );
           callback?.({ success: true, sessionId, members });

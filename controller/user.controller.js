@@ -522,13 +522,9 @@ export async function updateUserController(req, res) {
     const updates = { name, bio, avatar, mobile };
     if (typeof readReceipts === "boolean") updates.readReceipts = readReceipts;
 
-    const user = await UserModel.findByIdAndUpdate(
-      req.userId,
-      updates,
-      {
-        returnDocument: "after",
-      },
-    ).select("-password -refresh_token");
+    const user = await UserModel.findByIdAndUpdate(req.userId, updates, {
+      returnDocument: "after",
+    }).select("-password -refresh_token");
 
     return res.status(200).json({
       message: "Profile updated",

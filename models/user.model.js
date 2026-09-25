@@ -5,14 +5,14 @@ const userSchema = new mongoose.Schema(
     name: {
       type: String,
       required: [true, "Provide name"],
-      trim: true
+      trim: true,
     },
 
     username: {
       type: String,
       unique: true,
       sparse: true,
-      trim: true
+      trim: true,
     },
 
     email: {
@@ -20,104 +20,110 @@ const userSchema = new mongoose.Schema(
       required: [true, "Provide email"],
       unique: true,
       lowercase: true,
-      trim: true
+      trim: true,
     },
 
     password: {
       type: String,
-      required: [true, "Provide password"]
+      required: [true, "Provide password"],
     },
 
     avatar: {
       type: String,
-      default: ""
+      default: "",
     },
 
     bio: {
       type: String,
-      default: ""
+      default: "",
     },
 
     mobile: {
       type: String,
-      default: null
+      default: null,
     },
 
     refresh_token: {
       type: String,
-      default: ""
+      default: "",
     },
 
     verify_email: {
       type: Boolean,
-      default: false
+      default: false,
     },
 
     isOnline: {
       type: Boolean,
-      default: false
+      default: false,
     },
 
     readReceipts: {
       type: Boolean,
-      default: true
+      default: true,
     },
 
     lastSeen: {
       type: Date,
-      default: null
+      default: null,
     },
 
     last_login_date: {
       type: Date,
-      default: null
+      default: null,
     },
 
-    followers: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
-    }],
+    followers: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
 
-    following: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User"
-    }],
+    following: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User",
+      },
+    ],
 
-    savedPosts: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Post"
-    }],
+    savedPosts: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Post",
+      },
+    ],
 
     status: {
       type: String,
       enum: ["Active", "Inactive", "Suspended"],
-      default: "Active"
+      default: "Active",
     },
 
     otp: {
       type: String,
-      default: null
+      default: null,
     },
 
     otpExpiry: {
       type: Date,
-      default: null
+      default: null,
     },
 
     role: {
       type: String,
       enum: ["ADMIN", "USER"],
-      default: "USER"
+      default: "USER",
     },
 
     isVerified: {
       type: Boolean,
-      default: false
-    }
+      default: false,
+    },
   },
   {
-    timestamps: true
-  }
+    timestamps: true,
+  },
 );
 
 const UserModel = mongoose.model("User", userSchema);
